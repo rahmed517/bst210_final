@@ -1,0 +1,162 @@
+---
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE,warning = FALSE)
+library(tidyverse)
+library(ggplot2)
+library(scales)
+library(ggthemes)
+```
+
+## Exploratory Plots of Medicaid Quality Health Measures Data 2018
+
+```{r, echo = F}
+
+dat <- read_csv("2018_Adult_Health_Care_Quality_Measures.csv") %>% suppressWarnings() %>% suppressMessages()
+
+#Snake case field names
+names(dat) <- tolower(str_replace_all(names(dat), " ", "_"))  
+
+#Convert state rate to numeric
+dat <- dat %>% 
+  mutate(
+    state_rate = ifelse(state_rate == "NR", "", state_rate),
+    state_rate = as.numeric(state_rate)
+  ) 
+
+# Pull in 2018 demographic data for states
+state_demo <- readxl::read_excel("../../Documents/Medicaid/State County All Table 2018.xlsx", sheet = "State_county 2018", skip = 1)
+# snake case field names
+names(state_demo) <- tolower(str_replace_all(names(state_demo), " ", "_")) 
+
+
+# CREATE EXPANSION TABLE --------------------------------------------------
+# Medicaid expansion dates from https://www.facs.org/-/media/files/quality-programs/cancer/ncdb/puf_data_dictionary.ashx
+
+exp <- data.frame(state = state.name, stringsAsFactors = F)
+
+# KY, NV, CO, OR, NM, WV, AR, RI, AZ, MD, MA, ND, OH, IA, IL, VT, HI, NY, DE - 1/2014 Expansion states
+exp_1_2014 <- state.name[match(c("KY", "NV", "CO", "OR", "NM", "WV", "AR", "RI", "AZ", "MD", "MA", "ND", "OH", "IA", "IL", "VT", "HI", "NY", "DE"), state.abb)]
+# WA, CA, NJ, MN, DC, CT - Early expansion - (2010- 2013)
+early_exp <- state.name[match(c("WA", "CA", "NJ", "MN", "DC", "CT" ), state.abb)]
+# NH, IN, MI, PA,AK,MT,LA - Late Expansion States (after Jan. 2014)
+late_exp <- state.name[match(c("WA", "CA", "NJ", "MN", "DC", "CT" ), state.abb)]
+
+exp <- exp %>% 
+  mutate(
+    exp_time = ifelse(state %in% exp_1_2014, "Expanded 1/2014", ifelse(state %in% early_exp, "Expanded 2010-2013", ifelse(state %in% late_exp, "Expanded after 1/2014", "No Expansion")))
+  )
+
+# Add expansion info to data 
+dat <- dat %>% 
+  left_join(
+    exp,
+    by = "state"
+  )
+
+
+# PlOT ---------------------------------------------------------------------
+
+
+# This function flips the data wide and keeps state rates for two different measure
+plot_measures_data <- function(dat, m1, m2) {
+  d <- dat %>% 
+    filter(measure_abbreviation == m1) %>% 
+    select(state, measure_abbreviation, state_rate) %>% 
+    full_join(
+      dat %>% 
+        filter(measure_abbreviation == m2) %>% 
+        select(state, measure_abbreviation, state_rate),
+      by = c("state"),
+      suffix = c("_m1", "_m2")
+    )
+  
+  return(d)
+  
+}
+
+```
+
+
+## Relevant Scatter Plots
+
+```{r, echo = t}
+#### SCATTER PLOTS
+p1_d <- plot_measures_data(dat, "AMR-AD","PQI05-AD")
+(plot_1 <- ggplot(p1_d, aes(x = state_rate_m1, y = state_rate_m2)) +
+  geom_point()+
+  geom_smooth()+
+  xlab("Asthma Medication Ratio: 19-64")+
+  ylab("PQI-05") +
+  ggtitle("Assocation between PQI-05 and Asthma Medication Ratio in 2018")+
+  theme_bw())
+
+
+p2_d <- plot_measures_data(dat, "ABA-AD","PQI05-AD")
+(plot_2 <- ggplot(p2_d, aes(x = state_rate_m1, y = state_rate_m2)) +
+  geom_point()+
+  geom_smooth()+
+  xlab("BMI")+
+  ylab("PQI-05") +
+  ggtitle("Assocation between PQI-05 and BMI in 2018") +
+  theme_bw())
+
+p3_d <- plot_measures_data(dat, "PQI15-AD","PQI05-AD")
+(plot_3 <- ggplot(p3_d, aes(x = state_rate_m1, y = state_rate_m2)) +
+  geom_point()+
+  geom_smooth()+
+  xlab("PQI-15")+
+  ylab("PQI-05") +
+  ggtitle("Assocation between PQI-05 and PQI-15 in 2018") +
+  theme_bw())
+
+###### DEMOGRAPHIC DISTRIBUTIONS BY STATE
+state1 <- state_demo %>% 
+  filter(county == "STATE TOTAL") %>% 
+  select(state, percent_eligible_for_medicaid) %>% 
+  mutate(
+    percent_eligible_for_medicaid = as.numeric(str_replace(percent_eligible_for_medicaid, "[%]", ""))/100
+  )
+
+(plot_4 <- ggplot(state1, aes(x = percent_eligible_for_medicaid)) +
+  geom_histogram(color = "black") +
+  scale_x_continuous(labels = percent) +
+  xlab("Percentage of State Eligible for Medicaid") +
+  ylab("Count") +
+  ggtitle("Distribution of Medicaid Eligibility in 2018") +
+  theme_bw())
+
+
+(plot_5 <- dat %>% 
+  filter(str_detect(measure_abbreviation, "PQI05")) %>% 
+  ggplot(aes(x = state_rate)) +
+  geom_histogram(binwidth = 20,color = "black") +
+  facet_wrap(.~exp_time) +
+  xlab("Inpatient Hospital Admissions for Chronic Obstructive Pulmonary Disease (COPD)\n or Asthma per 100,000 Beneficiary Months: Ages 40 to 64") +
+  ylab("Count") +
+  ggtitle("Distribution of PQI-05 with Medicaid Expansion"))
+```
+
+## Histograms of PQIs
+
+```{r}
+### Create PQI histograms
+histo_data <- dat %>% 
+  filter(str_detect(measure_name, "PQI")) %>% 
+  select(state, measure_abbreviation, state_rate) 
+
+(plot_6 <- ggplot(histo_data, aes(x = state_rate)) +
+  geom_histogram(binwidth = 5, color = "black") +
+  scale_x_continuous(labels = comma) +
+  xlab("# of Admissions per 100,000 Beneficiary Months") +
+  ylab("Count") + 
+  facet_wrap(.~measure_abbreviation) +
+  theme_bw() +
+  ggtitle("Distribution of Prevention Quality Indicators"))
+```
+
+
+
+
