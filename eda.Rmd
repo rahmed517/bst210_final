@@ -1,30 +1,67 @@
 ---
-title: "eda_final"
-author: "Rowana Ahmed"
-date: "10/8/2020"
-output: html_document
+title: "PQI Data Exploration"
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Data Import
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+```{r}
+library(tidyverse)
+library(readxl)
+library(stringr)
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+quality <- read_csv('data/2018_Adult_Health_Care_Quality_Measures_expansion_status.csv')
+quality <- quality %>% mutate(state_rate = as.numeric(state_rate), 
+                              expansion_status = as.factor(expansion_status))
 
-```{r cars}
-summary(cars)
+
+
 ```
 
-## Including Plots
+## PQIs 2018 by Expansion Status
 
-You can also embed plots, for example:
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+
+```{r}
+
+dat <- quality %>% select(c('expansion_status', 'state', 'measure_name', 'state_rate')) %>%
+                   filter(str_detect(measure_name, 'PQI.*'))
+
+pqis = unique(dat$measure_name)
+
+
+for (pqi in pqis){
+    
+  p <- dat %>% filter(measure_name == pqi) %>% 
+            ggplot() +
+            geom_violin(aes(x=expansion_status, y=state_rate, 
+                            fill = expansion_status), alpha = 0.5) +
+            ggtitle(pqi) +
+            xlab('Expansion Status of States') + 
+            ylab('State Rates of Hospitalizations') +
+            scale_fill_discrete(name = 'Expansion Status', 
+                                labels = c('Early Expansion (2010-2013)', 
+                                           'Expanded in 2014',
+                                           'Expanded after 2014',
+                                           'Not expanded'))
+  
+  print(p)
+
+
+}
+
+
+
+
+
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
