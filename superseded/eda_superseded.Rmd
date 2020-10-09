@@ -1,0 +1,56 @@
+---
+title: "PQI Data Exploration"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Import
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(stringr)
+
+quality <- read_csv('data/2018_Adult_Health_Care_Quality_Measures_expansion_status.csv')
+quality <- quality %>% mutate(state_rate = as.numeric(state_rate), 
+                              expansion_status = as.factor(expansion_status))
+```
+
+## PQIs 2018 by Expansion Status
+
+
+
+```{r}
+
+dat <- quality %>% select(c('expansion_status', 'state', 'measure_name', 'state_rate')) %>%
+                   filter(str_detect(measure_name, 'PQI.*'))
+pqis = unique(dat$measure_name)
+
+for (pqi in pqis){
+    
+  p <- dat %>% filter(measure_name == pqi) %>% 
+            ggplot() +
+            geom_violin(aes(x=expansion_status, y=state_rate, 
+                            fill = expansion_status), alpha = 0.5) +
+            ggtitle(pqi) +
+            xlab('Expansion Status of States') + 
+            ylab('State Rates of Hospitalizations') +
+            scale_fill_discrete(name = 'Expansion Status', 
+                                labels = c('Early Expansion (2010-2013)', 
+                                           'Expanded in 2014',
+                                           'Expanded after 2014',
+                                           'Not expanded'))
+  
+  print(p)
+
+
+}
+```
+
+
+
