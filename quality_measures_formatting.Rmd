@@ -1,0 +1,56 @@
+---
+title: "quality_measure_format"
+author: "Rowana Ahmed"
+date: "11/1/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+
+```{r}
+quality <- read_csv('data/2018_Adult_Health_Care_Quality_Measures_expansion_status.csv') %>% 
+  suppressWarnings() %>% 
+  suppressMessages()
+
+quality <- quality %>% mutate(state_rate = as.numeric(state_rate), 
+                              expansion_status = as.factor(expansion_status))
+```
+
+```{r}
+names(quality)
+unique(quality['domain']) 
+
+## Quality Measure Categories
+# Behavioral Health Care			
+# Care of Acute and Chronic Conditions	***PQIs in this domain		 
+# Maternal and Perinatal Health			
+# Primary Care Access and Preventive Care
+
+quality %>% filter(domain == 'Primary Care Access and Preventive Care') %>% 
+            select('measure_name') %>% unique
+
+
+length(unique(quality$measure_name)) # 22
+length(unique(quality$rate_definition)) # 39
+
+```
+
+```{r}
+temp <- quality %>% mutate('unique_measure' = paste(measure_name, rate_definition, sep = '__')) %>%   
+       select(c('state', 'expansion_status',
+                'unique_measure', 'state_rate')) %>%       
+       pivot_wider(names_from = 'unique_measure', values_from = 'state_rate')
+```
+
+
+```{r}
+write_csv(temp, "data/quality_measures_clean.csv")
+```
+
