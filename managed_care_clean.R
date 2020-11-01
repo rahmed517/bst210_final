@@ -18,6 +18,7 @@ setwd("~/Desktop/bst210_final/")
 
 # LOAD DATA ---------------------------------------------------------------
 
+# Data source: https://data.medicaid.gov/dataset/2018-Managed-Care-Programs-By-State/ruxk-tas2
 mc_df_og <- read_csv("data/2018_Managed_Care_Programs_By_State.csv")
 
 ### ORIGINAL FIELD NAMES
