@@ -1,0 +1,48 @@
+---
+title: "quality_measures_aggregate"
+author: "Nellie Ponarul"
+date: "11/2/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+# Load in 2014-2019
+files <- dir("data", full.names = T)[str_detect(dir("data"), "_expansion_status")]
+
+dfs <- map_df(files, function(x) {tmp <- read_csv(x, col_types = cols(.default = "c")); tmp$yr <- str_extract(x, "[0-9]{4}"); return(tmp)})
+
+dfs <- dfs %>% 
+  mutate(
+    rate_definition = ifelse(is.na(rate_definition), measure_description, rate_definition)
+  )
+```
+
+
+```{r}
+# quality <- read_csv('data/2018_Adult_Health_Care_Quality_Measures_expansion_status.csv') %>% 
+#   suppressWarnings() %>% 
+#   suppressMessages()
+
+dfs <- dfs %>% mutate(state_rate = as.numeric(ifelse(state_rate == "NR", NA, state_rate)), 
+                              expansion_status = as.factor(expansion_status))
+```
+
+```{r}
+temp <- dfs %>% mutate('unique_measure' = paste(measure_name, rate_definition, sep = '__')) %>%   
+       select(c('yr','state', 'expansion_status',
+                'unique_measure', 'state_rate')) %>%       
+       pivot_wider(names_from = 'unique_measure', values_from = 'state_rate')
+```
+
+
+```{r}
+write_csv(temp, "data/quality_measures_clean_aggregate.csv")
+```
