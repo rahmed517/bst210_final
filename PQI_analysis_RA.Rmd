@@ -1,0 +1,191 @@
+---
+title: "PQI_analyis_RA"
+author: "Rowana Ahmed"
+date: "11/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE, echo=FALSE, warning=FALSE}
+library(tidyverse)
+```
+
+
+## Model A - What factors affect PQI?
+
+
+
+## Model B - Does PQI differ based on expansion status in states?
+
+```{r}
+
+measures = read_csv('data/quality_measures_clean.csv')
+table(measures$expansion_status)
+
+pqi_cols = names(measures)[str_detect(names(measures), 'PQI')]
+
+measures <- measures %>% rename(pqi_1 = `PQI 01: Diabetes Short-Term Complications Admission Rate: Age 18 and Older__Inpatient Hospital Admissions for Diabetes Short-Term Complications per 100,000 Beneficiary Months: Ages 18-64`,
+                    pqi_8 = `PQI 08: Heart Failure Admission Rate: Age 18 and Older__Inpatient Hospital Admissions for Heart Failure per 100,000 Beneficiary Months: Ages 18-64`,
+                    pqi_15 = `PQI 15: Asthma in Younger Adults Admission Rate: Ages 18-39__Inpatient Hospital Admissions for Asthma per 100,000 Beneficiary Months: Ages 18-39`,
+                    pqi_5 = `PQI 05: Chronic Obstructive Pulmonary Disease (COPD) or Asthma in Older Adults Admission Rate: Age 40 and Older__Inpatient Hospital Admissions for Chronic Obstructive Pulmonary Disease (COPD) or Asthma per 100,00 Beneficiary Months: Ages 40-64`)
+
+measures <- measures %>% mutate(expansion_status = as.factor(expansion_status))
+
+
+```
+
+### Expanded versus not expanded simplification (group status 1/2/3 together) & perform logistic regression [better sample sizes per category]
+
+```{r}
+measures <- measures %>% mutate(not_expanded = 0)
+measures$not_expanded[which(measures$expansion_status == 4)] = 1
+```
+
+
+#### Continuous Covariate
+```{r}
+mod.binary = glm(not_expanded ~ pqi_1 + pqi_5 + pqi_8 + pqi_15, 
+                 family = binomial(), data = measures)
+summary(mod.binary)
+
+
+mod.pqi_1 = glm(not_expanded  ~ pqi_1, 
+                 family = binomial(), data = measures)
+summary(mod.pqi_1)
+
+
+mod.pqi_5 = glm(not_expanded  ~ pqi_5, 
+                 family = binomial(), data = measures)
+summary(mod.pqi_5)
+
+
+mod.pqi_8 = glm(not_expanded  ~ pqi_8, 
+                 family = binomial(), data = measures)
+summary(mod.pqi_8)
+
+
+mod.pqi_15 = glm(not_expanded  ~ pqi_15, 
+                 family = binomial(), data = measures)
+summary(mod.pqi_15)
+
+
+```
+
+#### Categorical Covariate (Ordinal vs Nominal)
+
+```{r}
+summary(measures %>% select( c('pqi_1', 'pqi_5', 'pqi_8', 'pqi_15')))
+```
+
+
+```{r}
+library(gtools)
+measures <- measures %>% mutate(cat_pqi_1 = quantcut(pqi_1, 4), 
+                    cat_pqi_5 = quantcut(pqi_5, 4),
+                    cat_pqi_8 = quantcut(pqi_8, 4),
+                    cat_pqi_15 = quantcut(pqi_15, 4))
+
+
+
+levels(measures$cat_pqi_1)[1] <- 1
+levels(measures$cat_pqi_1)[2]<- 2
+levels(measures$cat_pqi_1)[3] <- 3
+levels(measures$cat_pqi_1)[4] <- 4
+
+levels(measures$cat_pqi_5)[1] <- 1
+levels(measures$cat_pqi_5)[2]<- 2
+levels(measures$cat_pqi_5)[3] <- 3
+levels(measures$cat_pqi_5)[4] <- 4
+
+
+levels(measures$cat_pqi_8)[1] <- 1
+levels(measures$cat_pqi_8)[2]<- 2
+levels(measures$cat_pqi_8)[3] <- 3
+levels(measures$cat_pqi_8)[4] <- 4
+
+
+levels(measures$cat_pqi_15)[1] <- 1
+levels(measures$cat_pqi_15)[2]<- 2
+levels(measures$cat_pqi_15)[3] <- 3
+levels(measures$cat_pqi_15)[4] <- 4
+
+
+
+
+```
+
+
+
+```{r}
+mod.bcat <- glm(not_expanded ~ as.numeric(cat_pqi_1) +
+                               as.numeric(cat_pqi_5) + 
+                               as.numeric(cat_pqi_8) +
+                               as.numeric(cat_pqi_15) , 
+                
+                
+                family = binomial(), 
+                data = measures)
+summary(mod.bcat)
+
+
+mod.bcatnom <- glm(not_expanded ~ cat_pqi_1 + cat_pqi_5 + cat_pqi_8 + cat_pqi_15, 
+                family = binomial(), 
+                data = measures)
+summary(mod.bcatnom)
+
+```
+```{r}
+mod.bcat_pqi1 <- glm(not_expanded ~ as.numeric(cat_pqi_1), 
+                family = binomial(), 
+                data = measures)
+summary(mod.bcat_pqi1)
+
+
+mod.bcat_pqi5 <- glm(not_expanded ~ as.numeric(cat_pqi_5), 
+                family = binomial(), 
+                data = measures)
+summary(mod.bcat_pqi5)
+
+
+
+mod.bcat_pqi8 <- glm(not_expanded ~ as.numeric(cat_pqi_8), 
+                family = binomial(), 
+                data = measures)
+summary(mod.bcat_pqi8)
+
+
+mod.bcat_pqi15 <- glm(not_expanded ~ as.numeric(cat_pqi_15), 
+                family = binomial(), 
+                data = measures)
+summary(mod.bcat_pqi15)
+
+
+```
+
+
+
+### Multinomial Logistic Regression (y - expansion status category of 1, 2, 3, or 4)
+```{r}
+
+
+library(nnet)
+mod.all_multi <- multinom(expansion_status ~ pqi_1 + pqi_5 + pqi_8 + pqi_15, data = measures)
+summary(mod.all_multi)
+
+
+```
+
+```{r}
+# library(VGAM)
+# 
+# mod.no.po <- vglm(as.numeric(expansion_status) ~ pqi_1, cumulative(parallel=FALSE, reverse=T), 
+#                   data=measures)
+# 
+# summary(mod.no.po)
+
+```
+
+
