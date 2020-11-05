@@ -40,7 +40,25 @@ temp <- dfs %>% mutate('unique_measure' = paste(measure_name, rate_definition, s
        select(c('yr','state', 'expansion_status',
                 'unique_measure', 'state_rate')) %>%       
        pivot_wider(names_from = 'unique_measure', values_from = 'state_rate')
+``` 
+
+```{r}
+# Redo expansion year assignment based on year
+# Late Expansion States (after Jan. 2014)
+# NH 8/15/2014 
+# IN 1/2015
+# MI 4/2014
+# PA 1/2015
+# AK 9/2015 (MISSING FROM DATA)
+# MT 2016
+# LA 7/2016
+
+temp$exp <- "2014"
+temp$exp[temp$state %in% c("New Hampshire","Indiana", "Michigan" , "Pennsylvania")] <-  "2015"
+temp$exp[temp$state %in% c("Montana")] <-  "2016"
+temp$exp[temp$state %in% c("Louisiana")] <-  "2017"
 ```
+
 
 
 ```{r}
