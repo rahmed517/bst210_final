@@ -1,5 +1,5 @@
 ---
-title: "PQI_analyis_RA"
+title: "PQI vs Expansion Status in 2018"
 author: "Rowana Ahmed"
 date: "11/5/2020"
 output: html_document
@@ -36,6 +36,8 @@ measures <- measures %>% mutate(expansion_status = as.factor(expansion_status))
 
 
 ```
+
+
 
 ### Expanded versus not expanded simplification (group status 1/2/3 together) & perform logistic regression [better sample sizes per category]
 
@@ -115,6 +117,22 @@ levels(measures$cat_pqi_15)[4] <- 4
 
 
 
+```
+
+Linear Models
+```{r}
+
+summary(lm(measures$pqi_1 ~ as.numeric(measures$expansion_status)))
+summary(lm(measures$pqi_5 ~ as.numeric(measures$expansion_status)))
+summary(lm(measures$pqi_8 ~ as.numeric(measures$expansion_status)))
+summary(lm(measures$pqi_15 ~ as.numeric(measures$expansion_status)))
+
+temp <- measures %>% select(c(cat_pqi_1, cat_pqi_5, cat_pqi_8, cat_pqi_15)) %>%   
+                            sapply(as.numeric) %>% apply(1, mean, na.rm=TRUE)  
+measures <- measures %>% mutate(combined_mean =  temp)                           
+
+summary(lm(measures$combined_mean ~ as.numeric(measures$expansion_status)))
+```
 ```
 
 
