@@ -19,7 +19,7 @@ setwd("~/Desktop/bst210_final/")
 
 
 # Pull in 2018 demographic data for states
-state_demo <- readxl::read_excel("../../Documents/Medicaid/State County All Table 2018.xlsx", sheet = "State_county 2018", skip = 1)
+state_demo <- readxl::read_excel("data/State County All Table 2018.xlsx", sheet = "State_county 2018", skip = 1)
 # snake case field names
 names(state_demo) <- tolower(str_replace_all(names(state_demo), " ", "_")) 
 
@@ -55,6 +55,9 @@ state_demo <- state_demo %>%
 state_demo <- state_demo %>% 
   mutate_at(vars(`beneficiaries_with_part_a_and_part_b`:`pqi16_lower_extremity_amputation_admission_rate_(age_75+)`), as.numeric)
 
+state_demo <- state_demo %>% 
+  filter(!county %in% c("NATIONAL TOTAL", "STATE TOTAL", "UNKNOWN"))
+
 
 # SUBSET COLUMNS ----------------------------------------------------------
 state_demo <- state_demo[, c("state", "county", "ffs_beneficiaries",  "ma_beneficiaries" , "ma_participation_rate", "average_age" , "percent_female", "percent_male" , "percent_non-hispanic_white", "percent_african_american"  , "percent_hispanic", "percent_other/unknown", "percent_eligible_for_medicaid", "number_of_acute_hospital_readmissions" ,"hospital_readmission_rate", "emergency_department_visits", "emergency_department_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_tests", "%_of_beneficiaries_using_imaging" , "%_of_beneficiaries_using_dme", "fqhc/rhc_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_part_b_drugs")]
@@ -81,14 +84,15 @@ exp <- exp %>%
 state_demo <- state_demo %>% 
   left_join(exp, by = "state")
 
-
+# Save out cleaned up 2018 data
+saveRDS(state_demo, "data/medicare_2018.rds")
 
 
 # EXPLORATORY -------------------------------------------------------------
 
 # Is there more medicaid eligibile in medicaid expansion? 
 state_demo %>% 
-  filter(!county %in% c("NATIONAL TOTAL", "STATE TOTAL") & !is.na(expansion_status)) %>% 
+  filter(!county %in% c("NATIONAL TOTAL", "STATE TOTAL", "UNKNOWN") & !is.na(expansion_status)) %>% 
   group_by(expansion_status) %>% 
   summarize(avg_mcd_elig = mean(percent_eligible_for_medicaid, na.rm = T),
             cnt_counties = n())
@@ -97,14 +101,28 @@ state_demo$exp <- ifelse(state_demo$expansion_status == "4", 0, 1)
 state_demo$exp <- as.factor(state_demo$exp)
 
 # This model is pretty significant
-mod <- lm(emergency_department_visits_per_1000_beneficiaries ~ exp + percent_eligible_for_medicaid, data = state_demo)
+mod <- lm(emergency_department_visits_per_1000_beneficiaries ~ expansion_status + percent_eligible_for_medicaid, data = state_demo)
+
+# Do we need quadratic effects of percent eligilble?
+mod2 <- lm(emergency_department_visits_per_1000_beneficiaries ~ expansion_status + percent_eligible_for_medicaid + percent_eligible_for_medicaid_2, data = state_demo %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
+anova(mod, mod2) # Yes we need the quadratic effects of percent elibile
+
+summary(mod2)
+# Perform evaluation
+plot(mod2)
 AIC(mod)  
 
 # This model is pretty significant
 mod <- lm(hospital_readmission_rate ~ exp + percent_eligible_for_medicaid, data = state_demo)
+plot(mod)
+
 AIC(mod)
 
-summary(lm(hospital_readmission_rate ~ exp + percent_eligible_for_medicaid + `percent_non-hispanic_white` + `percent_african_american` + `percent_hispanic`, data = state_demo))
-AIC(lm(hospital_readmission_rate ~ exp + percent_eligible_for_medicaid + `percent_non-hispanic_white` + `percent_african_american` + `percent_hispanic`, data = state_demo))
 
+# Fit a poisson model
+mod.pois <- glm(emergency_department_visits_per_1000_beneficiaries ~ average_age + expansion_status, data = state_demo, family = poisson())
+
+summary(mod.pois)
+# Missing data
+apply(state_demo, 2, function(x) return(sum(is.na(x))))
 
