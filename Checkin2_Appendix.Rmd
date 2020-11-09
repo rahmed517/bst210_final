@@ -71,12 +71,28 @@ $$
 where $\lambda$ is the incidence rate or FQHRC/RHC visits per 1,000 beneficiaries.
 
 ```{r}
-mod.pois <-  glm(`fqhc/rhc_visits_per_1000_beneficiaries` ~ average_age + expansion_status + percent_eligible_for_medicaid + percent_eligible_for_medicaid_2, data = medicare %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = poisson())
+mod.pois <-  glm(`fqhc/rhc_visits_per_1000_beneficiaries` ~ average_age + expansion_status + percent_eligible_for_medicaid + percent_eligible_for_medicaid_2, data = na.omit(medicare[, c("county", "percent_eligible_for_medicaid", "average_age", "expansion_status", "fqhc/rhc_visits_per_1000_beneficiaries")]) %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = poisson())
 summary(mod.pois)
 exp(confint(mod.pois))
 ```  
 
-By our model, for counties that have the same average age of Medicare beneficiaries and same percentage of beneficiaries who are eligible for Medicaid, counties in states that expanded in 2014 have an incidence rate of FQHC/RHC visits that is `r sprintf("%.3f", exp(.2405))` (95\% CI: (1.219, 1.231)) times the incidence rate of FQHC/RHC visits in counties whose state expanded before 2014. For counties that have the same average age of Medicare beneficiaries and same percentage of beneficiaries who are eligible for Medicaid, counties in states that expanded after 2014 have an incidence rate of FQHC/RHC visits that is `r sprintf("%.3f", exp(-0.01871))` (95\% CI: (.976, .987)) times the incidence rate of FQHC/RHC visits in counties whose state expanded before 2014. For counties that have the same average age of Medicare beneficiaries and same percentage of beneficiaries who are eligible for Medicaid, counties in states that have not expanded have an incidence rate of FQHC/RHC visits that is `r sprintf("%.3f", exp(.1689))` (95\% CI: (1.179, 1.189)) times the incidence rate of FQHC/RHC visits in counties whose state expanded before 2014. 
+By our model, for counties that have the same average age of Medicare beneficiaries and same percentage of beneficiaries who are eligible for Medicaid, counties in states that expanded in 2014 have an incidence rate of FQHC/RHC visits that is `r sprintf("%.3f", exp(.2031))` (95\% CI: (1.219, 1.231)) times the incidence rate of FQHC/RHC visits in counties whose state expanded before 2014. For counties that have the same average age of Medicare beneficiaries and same percentage of beneficiaries who are eligible for Medicaid, counties in states that expanded after 2014 have an incidence rate of FQHC/RHC visits that is `r sprintf("%.3f", exp(-0.01871))` (95\% CI: (.976, .987)) times the incidence rate of FQHC/RHC visits in counties whose state expanded before 2014. For counties that have the same average age of Medicare beneficiaries and same percentage of beneficiaries who are eligible for Medicaid, counties in states that have not expanded have an incidence rate of FQHC/RHC visits that is `r sprintf("%.3f", exp(.1689))` (95\% CI: (1.179, 1.189)) times the incidence rate of FQHC/RHC visits in counties whose state expanded before 2014. 
+
+
+
+### Overdispersion  
+
+
+```{r}
+# Checking for Overdispersion (Latitude-only model)
+deviance(mod.pois)/mod.pois$df.residual
+pearson.stat1 <- sum((na.omit(medicare[, c("county", "percent_eligible_for_medicaid", "average_age", "expansion_status", "fqhc/rhc_visits_per_1000_beneficiaries")])$`fqhc/rhc_visits_per_1000_beneficiaries` - fitted(mod.pois))^2/fitted(mod.pois))
+pearson.stat1/mod.pois$df.residual
+```   
+
+The deviance/degrees of freedom is about 1105, and the Pearson $\chi^2$ statistic divided by degrees of freedom is around 1174. This indicates that there is overdisperson in the model. To account for this, we will need to try fitting a negative binomial model.
+
+
 
 
 
