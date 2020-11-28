@@ -24,6 +24,18 @@ state_demo <- readxl::read_excel("data/State County All Table 2018.xlsx", sheet 
 names(state_demo) <- tolower(str_replace_all(names(state_demo), " ", "_")) 
 
 
+# Create a dataset with all years in it
+sheets <- openxlsx::getSheetNames("data/State County All Table 2018.xlsx")
+
+
+
+all_years <- sheets %>% 
+  map(function(x) {tmp <- readxl::read_excel("data/State County All Table 2018.xlsx", x, skip = 1, col_types = "text"); tmp$year <- as.numeric(str_extract(x, "[0-9]{4}")); return(tmp)})
+
+all_years <- map_df(all_years, bind_rows)
+
+# snake case field names
+names(all_years) <- tolower(str_replace_all(names(all_years), " ", "_")) 
 # CLEAN ROWS --------------------------------------------------------------
 
 clean_nums_sing <- function(x) {
@@ -59,8 +71,23 @@ state_demo <- state_demo %>%
   filter(!county %in% c("NATIONAL TOTAL", "STATE TOTAL", "UNKNOWN"))
 
 
+all_years <- all_years %>% 
+  mutate_all(clean_nums)
+
+
+all_years <- all_years %>% 
+  mutate_at(vars(`beneficiaries_with_part_a_and_part_b`:`pqi16_lower_extremity_amputation_admission_rate_(age_75+)`), as.numeric)
+
+all_years <- all_years %>% 
+  filter(!county %in% c("NATIONAL TOTAL", "STATE TOTAL", "UNKNOWN"))
+
+
+
 # SUBSET COLUMNS ----------------------------------------------------------
 state_demo <- state_demo[, c("state", "county", "ffs_beneficiaries",  "ma_beneficiaries" , "ma_participation_rate", "average_age" , "percent_female", "percent_male" , "percent_non-hispanic_white", "percent_african_american"  , "percent_hispanic", "percent_other/unknown", "percent_eligible_for_medicaid", "number_of_acute_hospital_readmissions" ,"hospital_readmission_rate", "emergency_department_visits", "emergency_department_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_tests", "%_of_beneficiaries_using_imaging" , "%_of_beneficiaries_using_dme", "fqhc/rhc_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_part_b_drugs")]
+
+
+all_years <- all_years[, c("state", "county", "ffs_beneficiaries",  "ma_beneficiaries" , "ma_participation_rate", "average_age" , "percent_female", "percent_male" , "percent_non-hispanic_white", "percent_african_american"  , "percent_hispanic", "percent_other/unknown", "percent_eligible_for_medicaid", "number_of_acute_hospital_readmissions" ,"hospital_readmission_rate", "emergency_department_visits", "emergency_department_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_tests", "%_of_beneficiaries_using_imaging" , "%_of_beneficiaries_using_dme", "fqhc/rhc_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_part_b_drugs", "year")]
 
 
 
@@ -84,9 +111,13 @@ exp <- exp %>%
 state_demo <- state_demo %>% 
   left_join(exp, by = "state")
 
-# Save out cleaned up 2018 data
-saveRDS(state_demo, "data/medicare_2018.rds")
+all_years <- all_years %>% 
+  left_join(exp, by = "state")
 
+# Save out cleaned up 2018 data
+# saveRDS(state_demo, "data/medicare_2018.rds")
+
+saveRDS(all_years, "data/medicare_2007_2018.rds")
 
 # EXPLORATORY -------------------------------------------------------------
 
