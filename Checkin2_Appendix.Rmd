@@ -1,0 +1,100 @@
+---
+title: 'BST210 Project Check-in 2: Appendix'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(scales)
+
+medicare <- readRDS("data/medicare_2018.rds")
+```
+
+## Linear Regression  
+
+All of our potential dependent variables are in the form of counts, rates and percentages, however for the purposes of this assignment, we treated the emergency department visits per 1,000 beneficiaries as a linear variable and fit a multiple linear regression to determine the effects of Medicaid expansion on this rate. For our analysis, we plan to run this model as a Poisson model.
+
+To evaluate the effects of Medicaid Expansion on health outcomes among the Medicare population in 2018, we fit a multiple linear regression model:  
+$$
+\begin{split}
+& E(\text{Number of ED visits/1,000 beneficiaries}) = \beta_0 + \beta_1*\text{Average Age} + \\
+& \beta_2*I(\text{State Expanded in 2014}) + \\
+& \beta_3*I(\text{State Expanded after 2014}) + \\
+& \beta_4*I(\text{State has not Expanded})  + \\
+& \beta_5*\text{Percent Eligible for Medicaid} + \\
+& \beta_6*\text{Percent Eligible for Medicaid}^2
+\end{split}
+$$  
+
+```{r}
+mod.lm <- lm(emergency_department_visits_per_1000_beneficiaries ~ average_age + 
+               expansion_status + percent_eligible_for_medicaid + 
+               percent_eligible_for_medicaid_2, data = medicare %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
+
+# Model interpretation
+summary(mod.lm)
+confint(mod.lm)
+```  
+According to this model, for counties with the same expansion status level and percent eligible for Medicaid, a one year increase in the average age of Medicare beneficiaries results in about 16 less emergency department visits per 1,000 beneficiaries. For counties with the same average age of Medicare beneficiaries and percent eligible for Medicaid, being in a state that expanded Medicaid in 2014 results in about 37 (95\% CI: (19.86, 53.69)) more emergency department visits per 1,000 beneficiaries than counties that are in states that expanded Medicaid before 2014. For counties with the same average age of Medicare beneficiaries and percent eligible for Medicaid, being in a state that expanded Medicaid in years after 2014 results in about 16 (95\% CI: (-2.326, 35.24)) more emergency department visits per 1,000 beneficiaries than counties that are in states that expanded Medicaid before 2014. For counties with the same average age of Medicare beneficiaries and percent eligible for Medicaid, being in a state that has not expanded Medicaid results in about 56 (95\% CI: (39.67, 72.06)) more emergency department visits per 1,000 beneficiaries than counties that are in states that expanded Medicaid before 2014. For counties in states with the same expansion category and average age of Medicare beneficiaries, a one percent increase in the percent eligible for Medicaid results in about 571 less emergency department visits per 1,000 beneficiaries.  All p-values, with the exception of that for the expansion category 3 (state expanded Medicaid after 2014), is < 0.001.
+
+```{r}
+# Model evaluation
+par(mfrow = c(2, 2))
+hist(mod.lm$residuals, main = "Histogram of Residuals", xlab = "Residuals") 
+qqnorm(residuals(mod.lm), pch = 20, col = "tomato", main = "Unstandardized Residuals") 
+qqline(residuals(mod.lm)) #NJP Added line
+plot(fitted(mod.lm), residuals(mod.lm), main = "Plot of Residuals against Fitted Values", xlab = "Fitted Values", ylab = "Residuals") 
+abline(h = 0, col = "cornflowerblue", lwd = 2)
+```    
+
+In evaluating this linear model, we have determined that the linearity assumption holds, as there is no pattern in the residuals. The residuals are pretty normally distributed, although there is some evidence of left skew in the qqplot. 
+
+
+
+## Poisson Regression  
+
+FQHC/RHC centers are centers that provide services to Medicare beneficiaries in geographic areas that have a shortage of health services.  To determine the effect of Medicaid expansion on the rate of FQHC/RHC visits per 1,000 beneficiaries, we fit a Poisson model. The form of the model is:  
+
+$$
+\begin{split}
+& log(\lambda) = \beta_0 + \beta_1*Average Age + \\
+& \beta_2*I(\text{State Expanded Medicaid in 2014}) + \\
+& \beta_3*I(\text{State Expanded Medicaid after 2014}) + \\
+& \beta_4*I(\text{State has not expanded Medicaid}) + \\
+& \beta_5*I(\text{Percent Eligible for Medicaid}) +\\
+& \beta_6 * I(\text{Percent Eligible for Medicaid}^2)
+\end{split}
+$$  
+
+where $\lambda$ is the incidence rate or FQHRC/RHC visits per 1,000 beneficiaries.
+
+```{r}
+mod.pois <-  glm(`fqhc/rhc_visits_per_1000_beneficiaries` ~ average_age + expansion_status + percent_eligible_for_medicaid + percent_eligible_for_medicaid_2, data = na.omit(medicare[, c("county", "percent_eligible_for_medicaid", "average_age", "expansion_status", "fqhc/rhc_visits_per_1000_beneficiaries")]) %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = poisson())
+summary(mod.pois)
+exp(confint(mod.pois))
+```  
+
+By our model, for counties that have the same average age of Medicare beneficiaries and same percentage of beneficiaries who are eligible for Medicaid, counties in states that expanded in 2014 have an incidence rate of FQHC/RHC visits that is `r sprintf("%.3f", exp(.2031))` (95\% CI: (1.219, 1.231)) times the incidence rate of FQHC/RHC visits in counties whose state expanded before 2014. For counties that have the same average age of Medicare beneficiaries and same percentage of beneficiaries who are eligible for Medicaid, counties in states that expanded after 2014 have an incidence rate of FQHC/RHC visits that is `r sprintf("%.3f", exp(-0.01871))` (95\% CI: (.976, .987)) times the incidence rate of FQHC/RHC visits in counties whose state expanded before 2014. For counties that have the same average age of Medicare beneficiaries and same percentage of beneficiaries who are eligible for Medicaid, counties in states that have not expanded have an incidence rate of FQHC/RHC visits that is `r sprintf("%.3f", exp(.1689))` (95\% CI: (1.179, 1.189)) times the incidence rate of FQHC/RHC visits in counties whose state expanded before 2014. 
+
+
+
+### Overdispersion  
+
+
+```{r}
+# Checking for Overdispersion (Latitude-only model)
+deviance(mod.pois)/mod.pois$df.residual
+pearson.stat1 <- sum((na.omit(medicare[, c("county", "percent_eligible_for_medicaid", "average_age", "expansion_status", "fqhc/rhc_visits_per_1000_beneficiaries")])$`fqhc/rhc_visits_per_1000_beneficiaries` - fitted(mod.pois))^2/fitted(mod.pois))
+pearson.stat1/mod.pois$df.residual
+```   
+
+The deviance/degrees of freedom is about 1105, and the Pearson $\chi^2$ statistic divided by degrees of freedom is around 1174. This indicates that there is overdisperson in the model. To account for this, we will need to try fitting a negative binomial model.
+
+
+
+
+
+
+

@@ -1,0 +1,225 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Prep
+
+```{r, echo=FALSE, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+
+```
+
+
+```{r, echo=FALSE, include =FALSE}
+
+# LOAD DATA ---------------------------------------------------------------
+
+
+# Pull in 2018 demographic data for states
+state_demo <- readxl::read_excel("./data/State County All Table 2018.xlsx", sheet = "State_county 2018", skip = 1)
+# snake case field names
+names(state_demo) <- tolower(str_replace_all(names(state_demo), " ", "_")) 
+
+
+# CLEAN ROWS --------------------------------------------------------------
+
+clean_nums_sing <- function(x) {
+  tmp <- x
+  # Clean percentages 
+  if(!is.na(x)) {
+    if(str_detect(x, "\\%")) {
+      tmp <- str_replace(tmp, "\\%", "")
+      tmp <- as.numeric(tmp)/100.0
+      tmp <- as.character(tmp)
+    }
+    
+    if(x == "*") {
+      tmp <- str_replace_all(tmp, "\\*", "")
+    }
+  }
+  return(tmp)
+}
+
+# function to modify columns
+clean_nums <- function(col) {
+return(sapply(col, clean_nums_sing))
+}
+
+state_demo <- state_demo %>% 
+  mutate_all(clean_nums)
+
+
+state_demo <- state_demo %>% 
+  mutate_at(vars(`beneficiaries_with_part_a_and_part_b`:`pqi16_lower_extremity_amputation_admission_rate_(age_75+)`), as.numeric)
+
+
+# SUBSET COLUMNS ----------------------------------------------------------
+state_demo <- state_demo[, c("state", "county", "ffs_beneficiaries",  "ma_beneficiaries" , "ma_participation_rate", "average_age" , "percent_female", "percent_male" , "percent_non-hispanic_white", "percent_african_american"  , "percent_hispanic", "percent_other/unknown", "percent_eligible_for_medicaid", "number_of_acute_hospital_readmissions" ,"hospital_readmission_rate", "emergency_department_visits", "emergency_department_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_tests", "%_of_beneficiaries_using_imaging" , "%_of_beneficiaries_using_dme", "fqhc/rhc_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_part_b_drugs", "pqi03_diabetes_lt_complication_admission_rate_(age_<_65)")]
+
+
+
+# ADD ON EXPANSION STATUS -------------------------------------------------
+
+exp <- data.frame(state = state.abb, stringsAsFactors = F)
+
+# KY, NV, CO, OR, NM, WV, AR, RI, AZ, MD, MA, ND, OH, IA, IL, VT, HI, NY, DE - 1/2014 Expansion states
+exp_1_2014 <- c("KY", "NV", "CO", "OR", "NM", "WV", "AR", "RI", "AZ", "MD", "MA", "ND", "OH", "IA", "IL", "VT", "HI", "NY", "DE") 
+# WA, CA, NJ, MN, DC, CT - Early expansion - (2010- 2013)
+early_exp <- c("WA", "CA", "NJ", "MN", "DC", "CT" )
+# NH, IN, MI, PA,AK,MT,LA - Late Expansion States (after Jan. 2014)
+late_exp <- c("NH", "IN", "MI", "PA","AK","MT","LA" )
+
+exp <- exp %>% 
+  mutate(
+    expansion_status = ifelse(state %in% early_exp, "1", ifelse(state %in% exp_1_2014, "2", ifelse(state %in% late_exp, "3", "4")))
+  )
+
+
+state_demo <- state_demo %>% 
+  left_join(exp, by = "state")
+
+
+
+
+```
+
+```{r}
+state_demo %>% 
+  filter(!county %in% c("NATIONAL TOTAL", "STATE TOTAL") & !is.na(expansion_status)) %>% 
+  group_by(expansion_status) %>% 
+  summarize(avg_mcd_elig = mean(percent_eligible_for_medicaid, na.rm = T),
+            cnt_counties = n())
+
+state_demo$exp <- ifelse(state_demo$expansion_status == "4", 0, 1)
+state_demo$exp <- as.factor(state_demo$exp)
+state_demo$not_exp <- ifelse(state_demo$expansion_status == "4", 1, 0)
+state_demo$not_exp <- as.factor(state_demo$not_exp)
+
+county_dat <- state_demo %>% filter(!county %in% c("NATIONAL TOTAL", "STATE TOTAL"))
+
+
+county_dat <- county_dat %>% filter(!is.na(percent_eligible_for_medicaid) & 
+                                    !is.na(emergency_department_visits_per_1000_beneficiaries) &
+                                    !is.na(average_age) &
+                                    !is.na(hospital_readmission_rate))
+
+```
+
+
+## Data Analysis
+
+```{r, echo=FALSE, include=FALSE}
+names(county_dat)
+```
+
+#### Binomial Logistic Regression
+
+
+Initially we planned to examine Preventive Quality Indicators as a measure of health quality
+in a population, but these data points are only publically available at the state level, which
+would limit our analysis to only 50 observations. Thus, we have modified our analysis approach to
+consider data at the county level and use alternative measures for quality of health.
+```{r}
+pqi3 <- state_demo %>% filter(county == 'STATE TOTAL') %>% rename(pqi_03_less_65 = 'pqi03_diabetes_lt_complication_admission_rate_(age_<_65)')
+
+summary(glm(not_exp ~ pqi_03_less_65, family = binomial(), data=pqi3))
+
+```
+
+
+This reduced model confirms that the precentage of people eligible for medicaid in the Medicare
+population (i.e. dual eligible) is associated with whether the state has expanded 
+Medicaid access as part of the Affordable Care Act. 
+
+```{r}
+mod.1 <- glm(not_exp ~ percent_eligible_for_medicaid, family = binomial(), 
+            data= county_dat)
+summary(mod.1)
+```
+
+
+This extended model considers the additional covariates of health quality measures
+(hospital readmission rate & number of emergency department visits) and also controls for average
+age in the county population when predicting the county's Medicaid expansion status.
+
+```{r}
+mod.binary = glm(not_exp ~ 
+                 emergency_department_visits_per_1000_beneficiaries +
+                 hospital_readmission_rate + 
+                 average_age + 
+                 percent_eligible_for_medicaid,
+                 family = binomial(), data = county_dat)
+summary(mod.binary)
+
+```
+
+```{r}
+exp(100*0.0015904)
+CI=c(exp(100*(0.0015904-1.96*0.0003563)),exp(100*(0.0015904+1.96*0.0003563)))
+CI
+
+
+exp(2.6013322)
+CI=c(exp((2.6013322-1.64*1.4463722)),exp((2.6013322+1.64*1.4463722)))
+CI
+
+
+```
+
+
+```{r}
+anova(mod.1, mod.binary, test="Chisq" )
+
+```
+
+
+#### Multinomial  Logistic Regression (y - expansion status category of 1, 2, 3, or 4)
+```{r}
+
+library(nnet)
+mod.all_multi <- multinom(expansion_status ~ hospital_readmission_rate +
+                          average_age  +  
+                          emergency_department_visits_per_1000_beneficiaries + 
+                          percent_eligible_for_medicaid, 
+                          data = county_dat)
+summary(mod.all_multi)
+```
+```{r}
+exp(2.49)
+CI=c(exp((2.49-1.96*6.501529e-06)),exp((2.49+1.96*6.501529e-06)))
+CI
+
+
+exp(-0.57)
+CI=c(exp((-0.57-1.96* 6.783909e-06)),exp((-0.57+1.96* 6.783909e-06)))
+CI
+
+exp(3.95)
+CI=c(exp((3.95-1.96*5.847374e-06)),exp((3.95+1.96*5.847374e-06)))
+CI
+
+
+
+```
+
+
+#### Ordinal Logistic Regression
+
+```{r}
+library(VGAM)
+
+mod.no.po <- vglm(as.numeric(expansion_status) ~ emergency_department_visits_per_1000_beneficiaries +
+                  average_age ,
+                  cumulative(parallel=FALSE, reverse=T), data=county_dat)
+
+summary(mod.no.po)
+
+```
+
