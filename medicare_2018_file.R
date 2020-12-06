@@ -87,7 +87,7 @@ all_years <- all_years %>%
 state_demo <- state_demo[, c("state", "county", "ffs_beneficiaries",  "ma_beneficiaries" , "ma_participation_rate", "average_age" , "percent_female", "percent_male" , "percent_non-hispanic_white", "percent_african_american"  , "percent_hispanic", "percent_other/unknown", "percent_eligible_for_medicaid", "number_of_acute_hospital_readmissions" ,"hospital_readmission_rate", "emergency_department_visits", "emergency_department_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_tests", "%_of_beneficiaries_using_imaging" , "%_of_beneficiaries_using_dme", "fqhc/rhc_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_part_b_drugs")]
 
 
-all_years <- all_years[, c("state", "county", "ffs_beneficiaries",  "ma_beneficiaries" , "ma_participation_rate", "average_age" , "percent_female", "percent_male" , "percent_non-hispanic_white", "percent_african_american"  , "percent_hispanic", "percent_other/unknown", "percent_eligible_for_medicaid", "number_of_acute_hospital_readmissions" ,"hospital_readmission_rate", "emergency_department_visits", "emergency_department_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_tests", "%_of_beneficiaries_using_imaging" , "%_of_beneficiaries_using_dme", "fqhc/rhc_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_part_b_drugs", "year")]
+all_years <- all_years[, c("state", "county", "ffs_beneficiaries",  "ma_beneficiaries" , "ma_participation_rate", "average_age" , "percent_female", "percent_male" , "percent_non-hispanic_white", "percent_african_american"  , "percent_hispanic", "percent_other/unknown", "percent_eligible_for_medicaid", "number_of_acute_hospital_readmissions" ,"hospital_readmission_rate", "emergency_department_visits", "emergency_department_visits_per_1000_beneficiaries", "op_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_tests", "%_of_beneficiaries_using_imaging" , "%_of_beneficiaries_using_dme", "fqhc/rhc_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_part_b_drugs", "year")]
 
 
 
@@ -117,7 +117,8 @@ all_years <- all_years %>%
 # Save out cleaned up 2018 data
 # saveRDS(state_demo, "data/medicare_2018.rds")
 
-saveRDS(all_years, "data/medicare_2007_2018.rds")
+# saveRDS(all_years, "data/medicare_2007_2018.rds")
+# write_csv(all_years, "data/medicare_2007_2018.csv")
 
 # EXPLORATORY -------------------------------------------------------------
 
