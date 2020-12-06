@@ -68,21 +68,27 @@ medicare %>%
 # Emergency Department Visits per 1,000 beneficiaries
 # Poisson model:
 mod.pois_ed <- glm(emergency_department_visits_per_1000_beneficiaries ~ average_age + 
-                     expansion_status + percent_eligible_for_medicaid + year + 
+                     factor(expansion_status) + percent_eligible_for_medicaid + year + 
                      percent_eligible_for_medicaid_2, data = na.omit(medicare[, c("county", "percent_eligible_for_medicaid", "average_age", "expansion_status", "emergency_department_visits_per_1000_beneficiaries", "year")]) %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = poisson())
 summary(mod.pois_ed)
 
 # Check overdispersion:
-deviance(mod.pois_ed)/mod.pois_ed$df.residual # 20.99868
+deviance(mod.pois_ed)/mod.pois_ed$df.residual # 20.92336
 pearson.stat_ed <- sum((na.omit(medicare[, c("county", "percent_eligible_for_medicaid", "average_age", "expansion_status","emergency_department_visits_per_1000_beneficiaries", "year")])$emergency_department_visits_per_1000_beneficiaries - fitted(mod.pois_ed))^2/fitted(mod.pois_ed))
-pearson.stat_ed/mod.pois_ed$df.residual # 20.0565
+pearson.stat_ed/mod.pois_ed$df.residual # 19.98122
 
 
 # Since these are greater than 1, we fit a negative binomial version:
 mod.nb_ed <- MASS::glm.nb(emergency_department_visits_per_1000_beneficiaries ~ average_age + 
-                            expansion_status + percent_eligible_for_medicaid + year + 
+                            factor(expansion_status) + percent_eligible_for_medicaid + year + 
                             percent_eligible_for_medicaid_2, data = na.omit(medicare[, c("county", "percent_eligible_for_medicaid", "average_age", "expansion_status", "emergency_department_visits_per_1000_beneficiaries", "year")]) %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2)) 
 summary(mod.nb_ed)
+
+exp(confint(mod.nb_ed))
+# Get interpretation for the relevant covariates
+# IRR of ed visits for the expansion for cat 2 vs cat 1 is exp(coef(summary(mod.nb_ed))[3,1]) 1.05 (95\% CI (1.041901, 1.058925)) holding average age, year and percent eligible for medicaid constant
+# IRR of ed visits for the expansion for cat 3 vs cat 1 is exp(coef(summary(mod.nb_ed))[4,1]) 1.0346 (95\% CI (1.025334, 1.04397)) holding average age, year and percent eligible for medicaid constant
+# IRR of ed visits for the expansion for cat 4 vs cat 1 is exp(coef(summary(mod.nb_ed))[5,1]) 1.0503 (95\% CI (1.042278, 1.058522)) holding average age, year and percent eligible for medicaid constant
 
 # Check assumptions of negative binomial
 # not a lot of 0s, overdispersion
@@ -109,17 +115,23 @@ mod.nb_fqhc <- MASS::glm.nb(`fqhc/rhc_visits_per_1000_beneficiaries` ~ average_a
 summary(mod.nb_fqhc)
 
 # Adding outpatient visits per 1000 beneficiaries
-mod.pois_op <-  glm(op_visits_per_1000_beneficiaries ~ average_age + expansion_status + year + percent_eligible_for_medicaid + percent_eligible_for_medicaid_2, data = na.omit(medicare[, c("county", "percent_eligible_for_medicaid", "average_age", "expansion_status", "op_visits_per_1000_beneficiaries", "year")]) %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = poisson())
+mod.pois_op <-  glm(op_visits_per_1000_beneficiaries ~ average_age + factor(expansion_status) + year + percent_eligible_for_medicaid + percent_eligible_for_medicaid_2, data = na.omit(medicare[, c("county", "percent_eligible_for_medicaid", "average_age", "expansion_status", "op_visits_per_1000_beneficiaries", "year")]) %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = poisson())
 summary(mod.pois_op)
 
 # Check overdispersion
-deviance(mod.pois_op)/mod.pois_op$df.residual # 611.44
+deviance(mod.pois_op)/mod.pois_op$df.residual # 589.19
 pearson.stat_op <- sum((na.omit(medicare[, c("county", "percent_eligible_for_medicaid", "average_age", "expansion_status", "op_visits_per_1000_beneficiaries", "year")])$op_visits_per_1000_beneficiaries - fitted(mod.pois_op))^2/fitted(mod.pois_op))
-pearson.stat_op/mod.pois_op$df.residual # 629.5251
+pearson.stat_op/mod.pois_op$df.residual # 611.88
 
 # Since these are greater than 1, we fit a negative binomial version:
-mod.nb_op <-  MASS::glm.nb(op_visits_per_1000_beneficiaries ~ average_age + expansion_status + year + percent_eligible_for_medicaid + percent_eligible_for_medicaid_2, data = na.omit(medicare[, c("county", "percent_eligible_for_medicaid", "average_age", "expansion_status", "op_visits_per_1000_beneficiaries", "year")]) %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
+mod.nb_op <-  MASS::glm.nb(op_visits_per_1000_beneficiaries ~ average_age + factor(expansion_status) + year + percent_eligible_for_medicaid + percent_eligible_for_medicaid_2, data = na.omit(medicare[, c("county", "percent_eligible_for_medicaid", "average_age", "expansion_status", "op_visits_per_1000_beneficiaries", "year")]) %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
 summary(mod.nb_op)
+
+exp(confint(mod.nb_op))
+# Get interpretation for the relevant covariates
+# IRR of op visits for the expansion for cat 2 vs cat 1 is exp(coef(summary(mod.nb_op))[3,1]) 1.002651 (95\% CI (0.988,1.0177)) holding average age, year and percent eligible for medicaid constant
+# IRR of ed visits for the expansion for cat 3 vs cat 1 is exp(coef(summary(mod.nb_op))[4,1]) 1.131983 (95\% CI (1.113, 1.1509)) holding average age, year and percent eligible for medicaid constant
+# IRR of ed visits for the expansion for cat 4 vs cat 1 is exp(coef(summary(mod.nb_op))[5,1]) 0.87707 (95\% CI (0.8647,  0.890)) holding average age, year and percent eligible for medicaid constant
 
 
 # MODELS 2018 (NB only) -------------------------------------------------------------
