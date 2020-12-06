@@ -89,6 +89,7 @@ state_demo <- state_demo %>%
 
 ```
 
+
 ```{r, echo=FALSE, include =FALSE}
 state_demo %>% 
   filter(!county %in% c("NATIONAL TOTAL", "STATE TOTAL") & !is.na(expansion_status)) %>% 
@@ -317,7 +318,7 @@ AIC(mlr_em_age_gender)
 ```
 
 ```{r}
-anova(mlr_em_age_gender, mlr2)
+anova( mlr2, mlr_em_age_gender)
 ```
 
 #### Robust Sandwich Errors for Coefficient Estimates
@@ -367,13 +368,145 @@ $$
 
 ## Linear Regression: - HCC 2018 vs 2010
 
-```{r}
+Is there a difference in average HCC scores in 2018 vs 2010 for counties
+that expanded Medicaid early versus late?
+
+```{r, echo = FALSE, include = FALSE}
+
+# LOAD DATA ---------------------------------------------------------------
+
+
+# Pull in 2018 demographic data for states
+state_demo_2010 <- readxl::read_excel("./data/State County All Table 2018.xlsx", sheet = "State_county 2010", skip = 1)
+# snake case field names
+names(state_demo_2010) <- tolower(str_replace_all(names(state_demo_2010), " ", "_")) 
+
+
+# CLEAN ROWS --------------------------------------------------------------
+
+state_demo_2010 <- state_demo_2010 %>% 
+  mutate_all(clean_nums)
+
+state_demo_2010 <- state_demo_2010 %>% 
+  mutate_at(vars(`beneficiaries_with_part_a_and_part_b`:`pqi16_lower_extremity_amputation_admission_rate_(age_75+)`), as.numeric)
+
+
+# SUBSET COLUMNS ----------------------------------------------------------
+state_demo_2010 <- state_demo_2010[, c("state", "county", 
+                                       "average_age" , "percent_female", "percent_male" ,
+                                       "percent_eligible_for_medicaid", "average_hcc_score")]
+
 
 ```
 
+```{r, echo = FALSE, include = FALSE}
+state_demo_combo <- state_demo %>%
+  inner_join(state_demo_2010, by = c("state", "county"), 
+            suffix = c("_2018", "_2010"))
+
+
+state_demo_combo$exp <- ifelse(state_demo_combo$expansion_status == "4", 0, 1)
+state_demo_combo$exp <- as.factor(state_demo_combo$exp)
+state_demo_combo$not_exp <- ifelse(state_demo_combo$expansion_status == "4", 1, 0)
+state_demo_combo$not_exp <- as.factor(state_demo_combo$not_exp)
+
+county_dat_combo <- state_demo_combo %>% filter(!county %in% c("NATIONAL TOTAL", "STATE TOTAL"))
+
+
+county_dat_combo['hcc_ratio'] = county_dat_combo$average_hcc_score_2018/county_dat_combo$average_hcc_score_2010
+
+county_dat_combo['hcc_diff'] = county_dat_combo$average_hcc_score_2018 -county_dat_combo$average_hcc_score_2010
+
+
+county_dat_combo <- county_dat_combo %>% mutate(
+            delta_male = (percent_male_2018 - percent_male_2010)/percent_male_2010, 
+            delta_age = (average_age_2018 - average_age_2010)/average_age_2010,
+            delta_medicaid = (percent_eligible_for_medicaid_2018 - percent_eligible_for_medicaid_2010)/percent_eligible_for_medicaid_2010)
+
+
+county_dat_combo <- county_dat_combo %>% filter(!is.na(expansion_status) &
+                                                !is.na(delta_age) & 
+                                                !is.na(delta_medicaid) &
+                                                !is.na(delta_male))
+```
+
+
+### Exploratory Analysis
+
+Both the hcc ratio of 2018 vs 2010 values and the difference are normally distributed with long tails on both ends. Taking the log transform of the ratio
+does not substantially remedy the long tail issue.
+
+```{r}
+
+
+summary(county_dat_combo$hcc_ratio)
+ggplot() + geom_histogram(aes(county_dat_combo$hcc_ratio), col=1)
+
+summary(county_dat_combo$hcc_ratio)
+ggplot() + geom_histogram(aes(log10(county_dat_combo$hcc_ratio)), col=1)
+
+summary(county_dat_combo$hcc_diff)
+ggplot() + geom_histogram(aes(county_dat_combo$hcc_diff), col=1)
+```
+
+
+```{r}
+comp_red <- lm(hcc_diff ~ as.factor(expansion_status), 
+          data = county_dat_combo)
+summary(comp_red)
+```
+```{r}
+comp1 <- lm(hcc_diff ~ as.factor(expansion_status) +
+                       delta_medicaid + 
+                       delta_age +
+                       delta_male , 
+          data = county_dat_combo)
+summary(comp1)
+plot(comp1)
+```
+The additional quadratic delta_medicaid term improves the linearity of the final
+model, and is statistically significant.
+
+```{r}
+comp2 <- lm(hcc_diff ~ as.factor(expansion_status) +
+                       delta_medicaid + 
+                       delta_age +
+                       delta_male + 
+                       I(delta_medicaid**2), 
+          data = county_dat_combo)
+summary(comp2)
+plot(comp2)
+```
+
+The full model with the additional delta age, percent male, and percent eligible
+for medicaid is needed to explain the variation in the data.
+
+```{r}
+anova(comp_red, comp2)
+```
+#### Robust Sandwich Errors for Coefficient Estimates
+
+Because the residual plot depicts a violation of homoscedasticity and the qq plot
+illustrates deviation from normality, robust sandwich estimation methods were used to
+calculate the standard errors for the coefficients in the
+final adjusted model. This method is more robust than the
+standard LSE method for estimating the standard errors, and can be used to derive more
+accurate confidence intervals. 
+
+```{r}
+library(lmtest)
+library(sandwich)
+coeftest(comp2, vcov = vcovHC(comp2, type="HC1"))
+
+```
+```{r}
+# Confidence Intervals
+(0.0196943  + c(-1,1)*1.96*0.0052007) #95% ci for expanded vs not
 
 
 
+
+```
 ## Logistic Regression
 
 
