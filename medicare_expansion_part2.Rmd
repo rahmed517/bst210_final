@@ -1,0 +1,708 @@
+---
+title: "Medicare Expansion Analysis: Part 2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Data Prep
+
+```{r, echo=FALSE, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(gam)
+library(corrplot)
+```
+
+```{r, echo=FALSE, include =FALSE}
+
+# LOAD DATA ---------------------------------------------------------------
+
+
+# Pull in 2018 demographic data for states
+state_demo <- readxl::read_excel("./data/State County All Table 2018.xlsx", sheet = "State_county 2018", skip = 1)
+# snake case field names
+names(state_demo) <- tolower(str_replace_all(names(state_demo), " ", "_")) 
+
+
+# CLEAN ROWS --------------------------------------------------------------
+
+clean_nums_sing <- function(x) {
+  tmp <- x
+  # Clean percentages 
+  if(!is.na(x)) {
+    if(str_detect(x, "\\%")) {
+      tmp <- str_replace(tmp, "\\%", "")
+      tmp <- as.numeric(tmp)/100.0
+      tmp <- as.character(tmp)
+    }
+    
+    if(x == "*") {
+      tmp <- str_replace_all(tmp, "\\*", "")
+    }
+  }
+  return(tmp)
+}
+
+# function to modify columns
+clean_nums <- function(col) {
+return(sapply(col, clean_nums_sing))
+}
+
+state_demo <- state_demo %>% 
+  mutate_all(clean_nums)
+
+
+state_demo <- state_demo %>% 
+  mutate_at(vars(`beneficiaries_with_part_a_and_part_b`:`pqi16_lower_extremity_amputation_admission_rate_(age_75+)`), as.numeric)
+
+
+# SUBSET COLUMNS ----------------------------------------------------------
+state_demo <- state_demo[, c("state", "county", "ffs_beneficiaries",  "ma_beneficiaries" , "ma_participation_rate", "average_age" , "percent_female", "percent_male" , "percent_non-hispanic_white", "percent_african_american"  , "percent_hispanic", "percent_other/unknown", "percent_eligible_for_medicaid", "average_hcc_score", "number_of_acute_hospital_readmissions" ,"hospital_readmission_rate", "emergency_department_visits", "emergency_department_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_tests", "%_of_beneficiaries_using_imaging" , "%_of_beneficiaries_using_dme", "fqhc/rhc_visits_per_1000_beneficiaries", "%_of_beneficiaries_using_part_b_drugs")]
+
+
+
+# ADD ON EXPANSION STATUS -------------------------------------------------
+
+exp <- data.frame(state = state.abb, stringsAsFactors = F)
+
+# KY, NV, CO, OR, NM, WV, AR, RI, AZ, MD, MA, ND, OH, IA, IL, VT, HI, NY, DE - 1/2014 Expansion states
+exp_1_2014 <- c("KY", "NV", "CO", "OR", "NM", "WV", "AR", "RI", "AZ", "MD", "MA", "ND", "OH", "IA", "IL", "VT", "HI", "NY", "DE") 
+# WA, CA, NJ, MN, DC, CT - Early expansion - (2010- 2013)
+early_exp <- c("WA", "CA", "NJ", "MN", "DC", "CT" )
+# NH, IN, MI, PA,AK,MT,LA - Late Expansion States (after Jan. 2014)
+late_exp <- c("NH", "IN", "MI", "PA","AK","MT","LA" )
+
+exp <- exp %>% 
+  mutate(
+    expansion_status = ifelse(state %in% early_exp, "1", ifelse(state %in% exp_1_2014, "2", ifelse(state %in% late_exp, "3", "4")))
+  )
+
+
+state_demo <- state_demo %>% 
+  left_join(exp, by = "state")
+
+
+
+
+```
+
+
+```{r, echo=FALSE, include =FALSE}
+state_demo %>% 
+  filter(!county %in% c("NATIONAL TOTAL", "STATE TOTAL") & !is.na(expansion_status)) %>% 
+  group_by(expansion_status) %>% 
+  summarize(avg_mcd_elig = mean(percent_eligible_for_medicaid, na.rm = T),
+            cnt_counties = n())
+
+state_demo$exp <- ifelse(state_demo$expansion_status == "4", 0, 1)
+state_demo$exp <- as.factor(state_demo$exp)
+state_demo$not_exp <- ifelse(state_demo$expansion_status == "4", 1, 0)
+state_demo$not_exp <- as.factor(state_demo$not_exp)
+
+county_dat <- state_demo %>% filter(!county %in% c("NATIONAL TOTAL", "STATE TOTAL"))
+
+
+county_dat <- county_dat %>% filter(!is.na(percent_eligible_for_medicaid) & 
+                                    !is.na(emergency_department_visits_per_1000_beneficiaries) &
+                                    !is.na(average_age) &
+                                    !is.na(hospital_readmission_rate) & 
+                                    !is.na(expansion_status))
+
+```
+
+
+## Linear Regression - HCC ~ expansion status
+
+The hierarchical condition category (HCC) score is a model developed by 
+CMS to assign risk scores for patients based on health conditions. The risk score
+accounts for factors such as hospital admissions for acute and chronic issues, as well
+as various classes of diseases and conditions ranging in severity. The
+national average score is the reference point, and is equal to 1. A 68 year old individual
+without any complications for their type-2 diabetes and a healthy BMI would be considered 
+to have a total risk of 0, whereas a 68 year old patient with diabetic polyneuropathy, 
+hypertension, obesity, and a below knee amputation would have a risk score of 1.1808
+according to the CMS HCC model. 
+
+Although it is commonly used by insurance companies to estimate future patient costs, this
+metric can serve as a proxy to quantify the average individual health of a community. The average HCC score across U.S. counties is roughly normally distributed, with
+a median value of 0.96. There distribution is slightly right skewed, and a log transform
+might be considered if the model violates the LINE assumptions. 
+
+### Exploratory Analysis
+```{r}
+summary(county_dat$average_hcc_score)
+length(county_dat$average_hcc_score)
+ggplot() + geom_histogram(aes(county_dat$average_hcc_score), col=1) 
+           
+```
+
+```{r}
+ggplot() + geom_histogram(aes(log10(county_dat$average_hcc_score)), fill=2) 
+```
+
+The primary covariate of interest is expansion status, and average age & percent 
+eligible for medicaid are other important factors that should be adjusted for. There
+seems to be a slight difference in average HCC scores in the states that have not expanded
+& states that have expanded Medicaid, with larger variance in the counties that have 
+not expanded. 
+```{r}
+county_dat  %>% ggplot() + geom_violin(aes(expansion_status, log10(average_hcc_score), 
+                                          fill = expansion_status), alpha = 0.5) 
+```
+
+### Model Considerations
+
+#### Assess Collinearity of Potential Covariates
+
+```{r}
+
+vars <- c("average_hcc_score",  
+          "average_age",
+          "percent_male",
+          "percent_eligible_for_medicaid")
+covars <- county_dat %>% select(vars) %>% drop_na()
+corrplot(cor(covars), tl.cex = 0.7)
+
+```
+
+
+
+```{r}
+mlr_red <- lm(average_hcc_score ~ as.factor(expansion_status), 
+          data = county_dat)
+summary(mlr_red)
+```
+```{r}
+mlr <- lm(average_hcc_score ~ expansion_status +
+                              percent_eligible_for_medicaid + 
+                              I(percent_eligible_for_medicaid**2),
+          data = county_dat)
+summary(mlr)
+plot(mlr)
+```
+### Model Diagnostics
+
+The log transform does not remedy the normality violation of the model. 
+
+```{r}
+mlr_log <- lm(log(average_hcc_score) ~ expansion_status + 
+                              # average_age + I(average_age**2) +
+                              percent_eligible_for_medicaid + 
+                              I(percent_eligible_for_medicaid**2),
+          data = county_dat)
+summary(mlr_log)
+plot(mlr_log)
+```
+
+Consider average age & gender in model; both terms are significant &
+improve Adjusted R squared value. However, the linearity assumption seems to
+be violated based on the residuals vs fitted values plot. Also, the negative
+coefficients seem to be counterintuitive (HCC score would be expected to increase
+with increased age, not decrease as suggested by the negative coefficient).
+
+```{r}
+mlr2 <- lm(average_hcc_score ~ expansion_status + 
+                              average_age + 
+                              percent_male + 
+                              percent_eligible_for_medicaid + 
+                              I(percent_eligible_for_medicaid**2),
+          data = county_dat)
+summary(mlr2)
+plot(mlr2)
+```
+
+The model with the additional linear & quadratic % eligible for medicaid
+terms is needed to explain the variation in the data. The reduced model is not sufficient (F-test p < 0.05).
+
+Additionally, the model with the age & gender terms explain more variation
+in the data than the model consdering only the linear & quadratic % eligible for
+medicaid terms.
+
+```{r}
+anova(mlr_red, mlr)
+anova(mlr, mlr2)
+```
+
+
+
+```{r}
+AIC(mlr2)
+AIC(mlr)
+```
+
+
+#### Assess Effect Modification: 
+
+The interaction terms are not statistically significant (p>0.05) when examining
+whether expansion status modifies the % eligible for medicaid in each county. 
+
+
+```{r}
+mlr_em <- lm(average_hcc_score ~ expansion_status + 
+                              average_age + I(average_age**2) +
+                              percent_eligible_for_medicaid + 
+                              expansion_status*percent_eligible_for_medicaid,
+          data = county_dat)
+summary(mlr_em)
+```
+
+
+The interaction term considering effect modification between average age & percent
+male is significant, and also results in more intuitive coefficients that align
+with expected directions for increasing males & older members of the county population.
+
+The linearity of the model is also improved with the addition of the interaction term.
+
+```{r}
+mlr_em_age_gender <- lm(average_hcc_score ~ expansion_status + 
+                              average_age +  #I(average_age**2) +
+                              percent_male + I(percent_male**2) + 
+                              percent_eligible_for_medicaid + 
+                              I(percent_eligible_for_medicaid**2) + 
+                              average_age*percent_male,
+          data = county_dat)
+summary(mlr_em_age_gender)
+plot(mlr_em_age_gender)
+```
+```{r}
+age <- 65
+perc_male <- .5
+
+# 1 unit change in % male
+x <- 0.049072*age + 14.3*perc_male-7.57*perc_male**2 - 0.125855*age  
+
+y <- 0.049072*age + 14.3*(perc_male + 0.01)-7.57*((perc_male + 0.01)**2) - 0.125855*age  
+
+y - x
+
+# 1 unit change in age
+x <- 0.049072*age + 14.3*perc_male-7.57*perc_male**2 - 0.125855*age  
+
+y <- 0.049072*(age+1) + 14.3*perc_male-7.57*(perc_male**2) - 0.125855*(age+1)  
+
+y - x
+```
+
+```{r}
+m <- lm(average_hcc_score ~ percent_male + I(percent_male**2) + 
+                            average_age + 
+                            percent_male*average_age,
+           data = county_dat)
+
+plot(county_dat$percent_male, county_dat$average_hcc_score, col = 8, 
+     xlab = "percent male", ylab = "average hcc score")
+lines(seq(.3,.7,.05), predict(m, newdata = data.frame(average_age = 65, 
+                                                       percent_male = seq(.3,.7,.05))),
+      col = 3
+      )
+
+lines(seq(.3,.7,.05), predict(m, newdata = data.frame(average_age = 71, 
+                                                       percent_male = seq(.3,.7,.05))),
+      col = 5
+      )
+
+lines(seq(.3,.7,.05), predict(m, newdata = data.frame(average_age = 72, 
+                                                       percent_male = seq(.3,.7,.05))),
+      col = 4
+      )
+legend("topleft", c("65 years", "71 years", "72 years"), pch=1, col=c(3,5,4))
+
+```
+
+
+```{r}
+AIC(mlr_em_age_gender)
+```
+
+```{r}
+anova( mlr2, mlr_em_age_gender)
+```
+
+#### Robust Sandwich Errors for Coefficient Estimates
+
+Because the residual plot depicts a violation of homoscedasticity and the qq plot
+illustrates deviation from normality, robust sandwich estimation methods were used to
+calculate the standard errors for the coefficients in the
+final adjusted model. This method is more robust than the
+standard LSE method for estimating the standard errors, and can be used to derive more
+accurate confidence intervals. 
+
+```{r}
+library(lmtest)
+library(sandwich)
+coeftest(mlr_em_age_gender, vcov = vcovHC(mlr_em_age_gender, type="HC1"))
+
+```
+
+```{r}
+# Confidence Intervals
+(0.0010648  + c(-1,1)*1.96*0.0052007) #95% ci for expansion status 2
+(0.0145870 + c(-1,1)*1.96*0.0057930 ) #95% ci for expansion status 3
+(0.0345069 + c(-1,1)*1.96* 0.0051904) #95% ci for expansion status 4
+
+
+
+```
+
+
+### D. Model Summary 
+
+$$
+\begin{split}
+& E(\text{average HCC score}) = -3.54 \\
+& 0.001*\text{I(State Expanded Medicaid in 2014)} + \\
+& 0.015*\text{I(State Expanded Medicaid after 2014)} + \\
+& 0.035*\text{I(State has not Expanded Medicaid)} + \\
+& 0.049*\text{(average age)} + \\
+& 14.31*\text{(percent male)}  \\
+& -7.58*\text{(percent male)}^2 + \\
+& 0.82*\text{(percent eligible for medicaid)}  \\
+& -0.45*\text{(percent eligible for medicaid)}^2  \\
+& -0.13*\text{(average age * percent male)} 
+\end{split}
+$$ 
+
+
+## Linear Regression: - HCC 2018 vs 2010
+
+Is there a difference in average HCC scores in 2018 vs 2010 for counties
+that expanded Medicaid early versus late?
+
+```{r, echo = FALSE, include = FALSE}
+
+# LOAD DATA ---------------------------------------------------------------
+
+
+# Pull in 2018 demographic data for states
+state_demo_2010 <- readxl::read_excel("./data/State County All Table 2018.xlsx", sheet = "State_county 2010", skip = 1)
+# snake case field names
+names(state_demo_2010) <- tolower(str_replace_all(names(state_demo_2010), " ", "_")) 
+
+
+# CLEAN ROWS --------------------------------------------------------------
+
+state_demo_2010 <- state_demo_2010 %>% 
+  mutate_all(clean_nums)
+
+state_demo_2010 <- state_demo_2010 %>% 
+  mutate_at(vars(`beneficiaries_with_part_a_and_part_b`:`pqi16_lower_extremity_amputation_admission_rate_(age_75+)`), as.numeric)
+
+
+# SUBSET COLUMNS ----------------------------------------------------------
+state_demo_2010 <- state_demo_2010[, c("state", "county", 
+                                       "average_age" , "percent_female", "percent_male" ,
+                                       "percent_eligible_for_medicaid", "average_hcc_score")]
+
+
+```
+
+```{r, echo = FALSE, include = FALSE}
+state_demo_combo <- state_demo %>%
+  inner_join(state_demo_2010, by = c("state", "county"), 
+            suffix = c("_2018", "_2010"))
+
+
+state_demo_combo$exp <- ifelse(state_demo_combo$expansion_status == "4", 0, 1)
+state_demo_combo$exp <- as.factor(state_demo_combo$exp)
+state_demo_combo$not_exp <- ifelse(state_demo_combo$expansion_status == "4", 1, 0)
+state_demo_combo$not_exp <- as.factor(state_demo_combo$not_exp)
+
+county_dat_combo <- state_demo_combo %>% filter(!county %in% c("NATIONAL TOTAL", "STATE TOTAL"))
+
+
+county_dat_combo['hcc_ratio'] = county_dat_combo$average_hcc_score_2018/county_dat_combo$average_hcc_score_2010
+
+county_dat_combo['hcc_diff'] = county_dat_combo$average_hcc_score_2018 -county_dat_combo$average_hcc_score_2010
+
+
+county_dat_combo <- county_dat_combo %>% mutate(
+            delta_male = (percent_male_2018 - percent_male_2010)/percent_male_2010, 
+            delta_age = (average_age_2018 - average_age_2010)/average_age_2010,
+            delta_medicaid = (percent_eligible_for_medicaid_2018 - percent_eligible_for_medicaid_2010)/percent_eligible_for_medicaid_2010)
+
+
+county_dat_combo <- county_dat_combo %>% filter(!is.na(expansion_status) &
+                                                !is.na(delta_age) & 
+                                                !is.na(delta_medicaid) &
+                                                !is.na(delta_male))
+```
+
+
+### Exploratory Analysis
+
+Both the hcc ratio of 2018 vs 2010 values and the difference are normally distributed with long tails on both ends. Taking the log transform of the ratio
+does not substantially remedy the long tail issue.
+
+```{r}
+
+
+summary(county_dat_combo$hcc_ratio)
+ggplot() + geom_histogram(aes(county_dat_combo$hcc_ratio), col=1)
+
+summary(county_dat_combo$hcc_ratio)
+ggplot() + geom_histogram(aes(log10(county_dat_combo$hcc_ratio)), col=1)
+
+summary(county_dat_combo$hcc_diff)
+ggplot() + geom_histogram(aes(county_dat_combo$hcc_diff), col=1)
+```
+
+
+```{r}
+comp_red <- lm(hcc_diff ~ as.factor(expansion_status), 
+          data = county_dat_combo)
+summary(comp_red)
+```
+```{r}
+comp1 <- lm(hcc_diff ~ as.factor(expansion_status) +
+                       delta_medicaid + 
+                       delta_age +
+                       delta_male , 
+          data = county_dat_combo)
+summary(comp1)
+plot(comp1)
+```
+The additional quadratic delta_medicaid term improves the linearity of the final
+model, and is statistically significant.
+
+```{r}
+comp2 <- lm(hcc_diff ~ as.factor(expansion_status) +
+                       delta_medicaid + 
+                       delta_age +
+                       delta_male + 
+                       I(delta_medicaid**2) , 
+          data = county_dat_combo)
+summary(comp2)
+plot(comp2)
+```
+
+The full model with the additional delta age, percent male, and percent eligible
+for medicaid is needed to explain the variation in the data.
+
+```{r}
+anova(comp_red, comp2)
+```
+#### Robust Sandwich Errors for Coefficient Estimates
+
+Because the residual plot depicts a violation of homoscedasticity and the qq plot
+illustrates deviation from normality, robust sandwich estimation methods were used to
+calculate the standard errors for the coefficients in the
+final adjusted model. This method is more robust than the
+standard LSE method for estimating the standard errors, and can be used to derive more
+accurate confidence intervals. 
+
+```{r}
+library(lmtest)
+library(sandwich)
+coeftest(comp2, vcov = vcovHC(comp2, type="HC1"))
+
+```
+```{r}
+# Confidence Intervals
+(0.0196943  + c(-1,1)*1.96*0.0052007) #95% ci for expanded vs not
+
+
+
+
+```
+## Logistic Regression
+
+Create binary outcome categorizing hospital readmission rates & emergency department visits as high if the county rate exceeds the national average rate (hospital readmission - 18.06%, ED visits - 670 per 1000 beneficiaries)
+
+Also, create multinomial class var with following labels:
+
+     * 4 - hospital readmission rate & % beneficiaries with an ED visit above national average
+     * 3 - beneficiaries w/ ED visit above national average (hospital readmission below)
+     * 2 - hospital readmission rate above national average (ED below)
+     * 1  - both hospital readmission & ED below
+    
+```{r}
+
+county_dat['high_hospital_readmission'] = ifelse(county_dat$hospital_readmission_rate >= .1806, 1, 0)
+
+county_dat['high_ED'] = ifelse(county_dat$emergency_department_visits_per_1000_beneficiaries >= 670, 1, 0)
+
+county_dat['hospital_ED_class'] = case_when(
+                                    (county_dat$high_hospital_readmission == 1) &
+                                    (county_dat$high_ED == 1)~ 3,
+                                    county_dat$high_ED == 1 ~ 2,
+                                    county_dat$high_hospital_readmission == 1 ~ 2,
+                                    TRUE ~ 1)
+
+
+```
+
+
+#### Emergency Department Visits
+
+Expansion status of state is only predictive in the logistic model 
+looking at high ED rates in counties; it is not a statistically significant 
+predictor in the model with high hospitalization rates as the outcome (neither 
+in binary - expanded vs non-expanded nor more verbose 4/3/2/1 classification)
+
+```{r}
+mod.binary.ed = glm(high_ED ~ 
+                 as.factor(expansion_status) + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                I(percent_eligible_for_medicaid**2),
+                 family = binomial(), data = county_dat)
+summary(mod.binary.ed)
+```
+
+```{r}
+mod.binary.ed.cont = glm(high_ED ~ 
+                 as.integer(expansion_status) + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                 I(percent_eligible_for_medicaid**2),
+                 family = binomial(), data = county_dat)
+summary(mod.binary.ed.cont)
+
+```
+Reduced model treating expansion_status as a continous covariate is sufficient;
+the categorical information is not needed.
+
+```{r}
+anova(mod.binary.ed.cont, mod.binary.ed, test="Chisq")
+```
+
+
+```{r}
+exp(0.44094 + c(-1,1)*0.18333*1.96) # expansion status 2 vs 1
+exp(0.37138 + c(-1,1)*0.20519*1.96) # expansion status 3 vs 1
+exp(0.52777 + c(-1,1)*0.17554*1.96) # expansion status 4 vs 1
+
+
+# continuous
+exp(0.10027 + c(-1,1)*0.04257*1.96)
+
+```
+# GOF - Hosmer Lemeshow Goodness of Fit
+```{r}
+library(ResourceSelection)
+
+hoslem.test(county_dat$high_ED, predict(mod.binary.ed), g = 10)
+hoslem.test(county_dat$high_ED, predict(mod.binary.ed.cont), g= 10)
+```
+
+```{r}
+library(pROC)
+
+roc_cont <- roc(county_dat$high_ED, predict(mod.binary.ed.cont))
+roc_cat <- roc(county_dat$high_ED, predict(mod.binary.ed))
+plot(roc_cont)
+plot(roc_cat, add =TRUE, col = 3)
+
+legend(0,0.5, legend=c("continuous", "categorical"), col=c(1,3), lty=1)
+
+auc(roc_cont)
+auc(roc_cat)
+
+```
+
+
+#### Hospital Readmissions
+```{r}
+mod.binary.hosp = glm(high_hospital_readmission ~ 
+                 as.factor(expansion_status) + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid,
+                 family = binomial(), data = county_dat)
+summary(mod.binary.hosp)
+```
+
+
+## Multinomial Regression
+
+```{r}
+library(nnet)
+mod.multi <- multinom(as.factor(hospital_ED_class) ~ 
+                 as.factor(expansion_status) + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                 I(percent_eligible_for_medicaid**2) +
+                 I(average_age**2),
+                 data = county_dat)
+
+summary(mod.multi)
+```
+
+The model is not doing a good job classifying health outcome class
+based on expansion status.
+
+```{r}
+county_dat['predict'] <- predict(mod.multi)
+county_dat %>% ggplot() + geom_histogram(aes(predict, fill = expansion_status), stat="count")
+
+```
+
+```{r}
+county_dat %>% ggplot() + geom_histogram(aes(hospital_ED_class, fill = expansion_status), stat="count")
+```
+
+## Ordinal Regression
+```{r}
+library(VGAM)
+ord.all <- vglm(hospital_ED_class ~ 
+                 expansion_status + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                 I(percent_eligible_for_medicaid**2), 
+                cumulative(parallel=TRUE, reverse=TRUE), 
+                data=county_dat)
+
+summary(ord.all)
+
+```
+
+Test proportional odds assumption - no overlap in beta estimates confidence interval. Proportional odds assumption is violated.
+```{r}
+county_dat['ind3'] = ifelse(county_dat$hospital_ED_class == 3, 1, 0)
+county_dat['ind32'] = ifelse(county_dat$hospital_ED_class == 1, 0, 1)
+
+mod.3v12 <- glm(ind3 ~expansion_status + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                 I(percent_eligible_for_medicaid**2),
+                 family=binomial,
+                 data=county_dat)
+                
+                
+
+mod.32v1 <- glm(ind32 ~expansion_status + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                 I(percent_eligible_for_medicaid**2),
+                 family=binomial,
+                 data=county_dat)
+
+summary(mod.3v12)
+summary(mod.32v1)
+                
+```
+
+
+```{r}
+
+ord.all_potest <- vglm(hospital_ED_class ~ 
+                 as.factor(expansion_status) + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                 I(percent_eligible_for_medicaid**2), 
+                cumulative(parallel=FALSE, reverse=T), 
+                data=county_dat)
+
+summary(ord.all_potest)
+```
+
