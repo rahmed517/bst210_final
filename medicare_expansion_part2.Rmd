@@ -472,7 +472,7 @@ comp2 <- lm(hcc_diff ~ as.factor(expansion_status) +
                        delta_medicaid + 
                        delta_age +
                        delta_male + 
-                       I(delta_medicaid**2), 
+                       I(delta_medicaid**2) , 
           data = county_dat_combo)
 summary(comp2)
 plot(comp2)
@@ -509,7 +509,200 @@ coeftest(comp2, vcov = vcovHC(comp2, type="HC1"))
 ```
 ## Logistic Regression
 
+Create binary outcome categorizing hospital readmission rates & emergency department visits as high if the county rate exceeds the national average rate (hospital readmission - 18.06%, ED visits - 670 per 1000 beneficiaries)
+
+Also, create multinomial class var with following labels:
+
+     * 4 - hospital readmission rate & % beneficiaries with an ED visit above national average
+     * 3 - beneficiaries w/ ED visit above national average (hospital readmission below)
+     * 2 - hospital readmission rate above national average (ED below)
+     * 1  - both hospital readmission & ED below
+    
+```{r}
+
+county_dat['high_hospital_readmission'] = ifelse(county_dat$hospital_readmission_rate >= .1806, 1, 0)
+
+county_dat['high_ED'] = ifelse(county_dat$emergency_department_visits_per_1000_beneficiaries >= 670, 1, 0)
+
+county_dat['hospital_ED_class'] = case_when(
+                                    (county_dat$high_hospital_readmission == 1) &
+                                    (county_dat$high_ED == 1)~ 3,
+                                    county_dat$high_ED == 1 ~ 2,
+                                    county_dat$high_hospital_readmission == 1 ~ 2,
+                                    TRUE ~ 1)
+
+
+```
+
+
+#### Emergency Department Visits
+
+Expansion status of state is only predictive in the logistic model 
+looking at high ED rates in counties; it is not a statistically significant 
+predictor in the model with high hospitalization rates as the outcome (neither 
+in binary - expanded vs non-expanded nor more verbose 4/3/2/1 classification)
+
+```{r}
+mod.binary.ed = glm(high_ED ~ 
+                 as.factor(expansion_status) + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                I(percent_eligible_for_medicaid**2),
+                 family = binomial(), data = county_dat)
+summary(mod.binary.ed)
+```
+
+```{r}
+mod.binary.ed.cont = glm(high_ED ~ 
+                 as.integer(expansion_status) + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                 I(percent_eligible_for_medicaid**2),
+                 family = binomial(), data = county_dat)
+summary(mod.binary.ed.cont)
+
+```
+Reduced model treating expansion_status as a continous covariate is sufficient;
+the categorical information is not needed.
+
+```{r}
+anova(mod.binary.ed.cont, mod.binary.ed, test="Chisq")
+```
+
+
+```{r}
+exp(0.44094 + c(-1,1)*0.18333*1.96) # expansion status 2 vs 1
+exp(0.37138 + c(-1,1)*0.20519*1.96) # expansion status 3 vs 1
+exp(0.52777 + c(-1,1)*0.17554*1.96) # expansion status 4 vs 1
+
+
+# continuous
+exp(0.10027 + c(-1,1)*0.04257*1.96)
+
+```
+# GOF - Hosmer Lemeshow Goodness of Fit
+```{r}
+library(ResourceSelection)
+
+hoslem.test(county_dat$high_ED, predict(mod.binary.ed), g = 10)
+hoslem.test(county_dat$high_ED, predict(mod.binary.ed.cont), g= 10)
+```
+
+```{r}
+library(pROC)
+
+roc_cont <- roc(county_dat$high_ED, predict(mod.binary.ed.cont))
+roc_cat <- roc(county_dat$high_ED, predict(mod.binary.ed))
+plot(roc_cont)
+plot(roc_cat, add =TRUE, col = 3)
+
+legend(0,0.5, legend=c("continuous", "categorical"), col=c(1,3), lty=1)
+
+auc(roc_cont)
+auc(roc_cat)
+
+```
+
+
+#### Hospital Readmissions
+```{r}
+mod.binary.hosp = glm(high_hospital_readmission ~ 
+                 as.factor(expansion_status) + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid,
+                 family = binomial(), data = county_dat)
+summary(mod.binary.hosp)
+```
 
 
 ## Multinomial Regression
+
+```{r}
+library(nnet)
+mod.multi <- multinom(as.factor(hospital_ED_class) ~ 
+                 as.factor(expansion_status) + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                 I(percent_eligible_for_medicaid**2) +
+                 I(average_age**2),
+                 data = county_dat)
+
+summary(mod.multi)
+```
+
+The model is not doing a good job classifying health outcome class
+based on expansion status.
+
+```{r}
+county_dat['predict'] <- predict(mod.multi)
+county_dat %>% ggplot() + geom_histogram(aes(predict, fill = expansion_status), stat="count")
+
+```
+
+```{r}
+county_dat %>% ggplot() + geom_histogram(aes(hospital_ED_class, fill = expansion_status), stat="count")
+```
+
+## Ordinal Regression
+```{r}
+library(VGAM)
+ord.all <- vglm(hospital_ED_class ~ 
+                 expansion_status + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                 I(percent_eligible_for_medicaid**2), 
+                cumulative(parallel=TRUE, reverse=TRUE), 
+                data=county_dat)
+
+summary(ord.all)
+
+```
+
+Test proportional odds assumption - no overlap in beta estimates confidence interval. Proportional odds assumption is violated.
+```{r}
+county_dat['ind3'] = ifelse(county_dat$hospital_ED_class == 3, 1, 0)
+county_dat['ind32'] = ifelse(county_dat$hospital_ED_class == 1, 0, 1)
+
+mod.3v12 <- glm(ind3 ~expansion_status + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                 I(percent_eligible_for_medicaid**2),
+                 family=binomial,
+                 data=county_dat)
+                
+                
+
+mod.32v1 <- glm(ind32 ~expansion_status + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                 I(percent_eligible_for_medicaid**2),
+                 family=binomial,
+                 data=county_dat)
+
+summary(mod.3v12)
+summary(mod.32v1)
+                
+```
+
+
+```{r}
+
+ord.all_potest <- vglm(hospital_ED_class ~ 
+                 as.factor(expansion_status) + 
+                 percent_male +  
+                 average_age + 
+                 percent_eligible_for_medicaid +
+                 I(percent_eligible_for_medicaid**2), 
+                cumulative(parallel=FALSE, reverse=T), 
+                data=county_dat)
+
+summary(ord.all_potest)
+```
 
