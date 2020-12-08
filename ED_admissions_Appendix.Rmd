@@ -1,0 +1,133 @@
+---
+title: 'Medicaid Expansion: ED Admissions Model'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+medicare <- read_csv("data/medicare_2007_2018.csv")
+medicare$expansion_status <- factor(medicare$expansion_status)
+```  
+
+We'll be building a model to model the relationship between the emergency department visits per 1,000 beneficiaries. We will be adjusting this relationship using average age of the Medicare population, percent male, percent non-hispanic white, percent african american, percent hispanic, percent eligible for medicaid.  
+
+```{r}
+tbl <- medicare %>% 
+  select(
+    county, average_age, percent_male, `percent_non-hispanic_white`, percent_african_american, percent_hispanic, percent_eligible_for_medicaid, emergency_department_visits_per_1000_beneficiaries
+  ) %>% 
+  summarize_all(.funs = function(x) return(paste0(round(sum(is.na(x))/length(x), 3)*100, "\\%"))) %>% t() %>% data.frame() 
+
+names(tbl) <- c("% of Missing values")
+kableExtra::kable(tbl)
+```  
+
+There is a very high amount of missingness in the race variables  
+
+```{r}
+medicare %>% 
+  mutate(
+    p_white_missing = is.na(`percent_non-hispanic_white`),
+    p_aa_missing = is.na(percent_african_american),
+    p_h_missing = is.na(percent_hispanic)
+  ) %>% 
+  group_by(year, p_white_missing, p_aa_missing, p_h_missing) %>% 
+  summarize(cnt = n())
+```  
+
+It appears that the same counties do not report these metrics. Given the high percentage of missingness in these covariates, I've decided to drop them from my potential covariates list.  
+
+#### Check correlaton in the covariates  
+
+```{r}
+medicare %>% 
+  select(
+    percent_male, percent_eligible_for_medicaid, average_age
+  ) %>% na.omit() %>% cor() %>% corrplot::corrplot(method = "color")
+```  
+Given the high amount of correlation, I won't be using average_age.  
+
+### Check distribution of outcome  
+
+```{r}
+medicare %>% 
+  ggplot(aes(x= emergency_department_visits_per_1000_beneficiaries)) +
+  geom_histogram(color = "black") +
+  theme_bw()
+```  
+The outcome looks pretty normally distributed.  
+
+### Model Fitting   
+
+```{r}
+mod.nb_ed <- MASS::glm.nb(emergency_department_visits_per_1000_beneficiaries ~ percent_male + percent_eligible_for_medicaid + expansion_status + offset(log(year)), data = medicare)
+
+summary(mod.nb_ed)
+```  
+
+##### Check for quadratic effects of `percent_eligible_for_medicaid`   
+
+
+```{r}
+mod.nb_ed_1 <- MASS::glm.nb(emergency_department_visits_per_1000_beneficiaries ~ percent_male + percent_eligible_for_medicaid + expansion_status + percent_eligible_for_medicaid_2 + offset(log(year)), data = medicare %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
+
+summary(mod.nb_ed_1)
+```   
+
+#### Effect Modification  
+
+We think there may be effect modification between % eligible for medicaid and expansion status, since in general Medicaid expansion means a higher percentage of the population qualifies for Medicaid.  
+
+```{r}
+mod.nb_ed_2 <- MASS::glm.nb(emergency_department_visits_per_1000_beneficiaries ~ percent_male + percent_eligible_for_medicaid + expansion_status + percent_eligible_for_medicaid_2 + percent_eligible_for_medicaid*expansion_status+ offset(log(year)), data = medicare %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
+
+summary(mod.nb_ed_2)
+```    
+
+#### Model Diagnostics  
+
+
+```{r}
+medicare %>% select(percent_male, expansion_status, county, percent_eligible_for_medicaid, emergency_department_visits_per_1000_beneficiaries) %>% 
+  na.omit() %>% 
+  ggplot(aes(x = emergency_department_visits_per_1000_beneficiaries, y = fitted(mod.nb_ed_2))) +
+  geom_point(alpha = 0.7) +
+  geom_smooth() +
+  theme_bw()
+```   
+
+##### Check Poisson model  
+
+```{r}
+mod.pois_ed <- glm(emergency_department_visits_per_1000_beneficiaries ~ percent_male + percent_eligible_for_medicaid + expansion_status + percent_eligible_for_medicaid_2 + percent_eligible_for_medicaid*expansion_status+ offset(log(year)), data = medicare %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = "poisson")
+
+# Evaluate overdispersion
+deviance(mod.pois_ed)/mod.pois_ed$df.residual #  1 22.08818
+pearson.stat_ed <- sum((na.omit(medicare %>% select(percent_male, percent_eligible_for_medicaid, average_age,emergency_department_visits_per_1000_beneficiaries))$emergency_department_visits_per_1000_beneficiaries - fitted(mod.pois_ed))^2/fitted(mod.pois_ed))
+pearson.stat_ed/mod.pois_ed$df.residual #  40.62744
+
+# Evidence of overdispersion 
+mean(medicare$emergency_department_visits_per_1000_beneficiaries, na.rm = T) # 664.9697
+var(medicare$emergency_department_visits_per_1000_beneficiaries, na.rm = T) # 23235.82
+```   
+
+The negative binomial model seems appropriate then.  
+
+
+#### Interpretation  
+
+```{r}
+coef(mod.nb_ed_2)
+exp(confint(mod.nb_ed_2))
+```  
+
+
+
+
+
+
+
+
+
