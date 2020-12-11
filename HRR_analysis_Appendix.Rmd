@@ -1,6 +1,6 @@
 ---
-title: 'Medicaid Expanion: PQI Models'
-output: html_document
+title: 'Section 2: Fitting PQI Models'
+output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
@@ -14,45 +14,22 @@ hrr$expansion_status <- factor(hrr$expansion_status)
 
 ### PQIs of Interest  
 
-For these models, we will be looking at modeling the relationship between various PQIs at the HRR (hospital-referral region) level and Medicaid expansion status. We will be adjusting this relationship using average age of the Medicare population, percent male, percent non-hispanic white, percent african american, percent hispanic, percent eligible for medicaid, and the age category referred to in the PQI. 
+For these models, we will be looking at modeling the relationship between various PQIs at the HRR (hospital-referral region) level and Medicaid expansion status. For model selection, we started with the base model and added in potential covariates one by one from our list of potential covariates that did not have significant missingness in order to improve the model fit. We using likelihood ratio tests at each step to determine if adding the covariate was an appropriate addition to the model (checking the reduced model against the full model).
 
 ### Exploratory analysis on covariates  
 
-First we quantify the missingness in the covariates and outcomes:  
+First we quantify the missingness in the outcomes:  
 
 ```{r}
 tbl <- hrr %>% 
-  select(hrr, average_age, percent_male, `percent_non-hispanic_white`, percent_african_american, percent_hispanic, percent_eligible_for_medicaid, `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_40-64)`, `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_65-74)`, `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_75+)`, `pqi07_hypertension_admission_rate_(age_<_65)`,`pqi07_hypertension_admission_rate_(age_65-74)`,  `pqi07_hypertension_admission_rate_(age_75+)`, `pqi08_chf_admission_rate_(age_65-74)`, `pqi08_chf_admission_rate_(age_75+)`, `pqi08_chf_admission_rate_(age_<_65)`) %>% 
-  summarize_all(.funs = function(x) return(paste0(round(sum(is.na(x))/length(x), 3)*100, "\\%"))) %>% t() %>% data.frame() 
+  select( `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_40-64)`, `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_65-74)`, `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_75+)`, `pqi07_hypertension_admission_rate_(age_<_65)`,`pqi07_hypertension_admission_rate_(age_65-74)`,  `pqi07_hypertension_admission_rate_(age_75+)`, `pqi08_chf_admission_rate_(age_65-74)`, `pqi08_chf_admission_rate_(age_75+)`, `pqi08_chf_admission_rate_(age_<_65)`) %>% 
+  summarize_all(.funs = function(x) return(paste0(round(sum(is.na(x))/length(x), 3)*100, "%"))) %>% t() %>% data.frame() 
 
 names(tbl) <- c("% of Missing values")
 kableExtra::kable(tbl)
 ```  
 
 We have a very small percentage of missing data in our target covariates and 2 of the 3 PQIs. We believe PQI05 and PQI08 will be reasonable metrics to evaluate outpatient quality and it's relation to Medicaid expansion.
-
-#### Check correlaton in the covariates
-
-```{r}
-
-# hrr, average_age, percent_male, `percent_non-hispanic_white`, percent_african_american, percent_hispanic, percent_eligible_for_medicaid, `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_40-64)`, `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_65-74)`, `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_75+)`, `pqi07_hypertension_admission_rate_(age_<_65)`,`pqi07_hypertension_admission_rate_(age_65-74)`,  `pqi07_hypertension_admission_rate_(age_75+)`, `pqi08_chf_admission_rate_(age_65-74)`, `pqi08_chf_admission_rate_(age_75+)`, `pqi08_chf_admission_rate_(age_<_65)`
-
- hrr %>% 
-  select(average_age, percent_male, `percent_non-hispanic_white`, percent_african_american, percent_hispanic, percent_eligible_for_medicaid) %>% na.omit() %>% cor() %>% corrplot::corrplot(method = "color")
-
-plot_histogram <- function(df, var) {
-  df %>% ggplot(aes_string(x = var)) +
-    geom_histogram(bins = 20) +
-    theme_bw() %>% return()
-}
-```  
-
-Based on the correlation plot, I will remove percent non-hispanic white and average age from the model. I'll redo the correlation plot without those variables.  
-
-```{r}
-hrr %>% 
-  select(percent_male, percent_african_american, percent_hispanic, percent_eligible_for_medicaid) %>% na.omit() %>% cor() %>% corrplot::corrplot(method = "color")
-```  
 
 ### Check distribution of outcomes  
 
@@ -66,17 +43,15 @@ hrr %>%
   gather(age, pqi05, -year) %>% 
   mutate(
     age = str_sub(age, -10)
-  ) %>% ggplot(aes( x = pqi05)) + geom_histogram(color = "black") + theme_bw()
-
-# Check number of missing values
-hrr %>% 
-  filter(!is.na(expansion_status)) %>% 
-  select(year, `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_40-64)`, `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_65-74)`, `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_75+)`) %>% 
-  gather(age, pqi05, -year) %>% pull(pqi05) %>% .[is.na(.)] %>% length()
-
-```  
-
-With only 4 missing values, we'll continue with a complete case analysis for this variable 
+  ) %>% ggplot(aes( x = pqi05)) + geom_histogram(color = "black") + 
+  scale_x_continuous(labels = scales::comma) +
+  scale_y_continuous(labels = scales::comma) +
+  xlab("PQI 05") +
+  ylab("Count") +
+  ggtitle("Distribution of PQI 05: COPD/Asthma in Older Adults Admissions Rate (2007-2018)") +
+  theme_bw()
+```    
+The distribution has a slight right skewe.  
 
 
 #### PQI08
@@ -88,17 +63,17 @@ hrr %>%
   gather(age, pqi08, -year) %>% 
   mutate(
     age = str_sub(age, -10)
-  ) %>% ggplot(aes( x = pqi08)) + geom_histogram(color = "black") + theme_bw()
-
-# Check number of missing values
-hrr %>% 
-  filter(!is.na(expansion_status)) %>% 
-  select(year, `pqi08_chf_admission_rate_(age_65-74)`, `pqi08_chf_admission_rate_(age_75+)`, `pqi08_chf_admission_rate_(age_<_65)`) %>% 
-  gather(age, pqi08, -year) %>% pull(pqi08) %>% .[is.na(.)] %>% length()
+  ) %>% ggplot(aes( x = pqi08)) + geom_histogram(color = "black") + 
+  scale_x_continuous(labels = scales::comma) +
+  scale_y_continuous(labels = scales::comma) +
+  xlab("PQI 08") +
+  ylab("Count") +
+  ggtitle("Distribution of PQI 05: Congestive Heart Failure Admissions Rate (2007-2018)") +
+  theme_bw()
 
 ```    
 
-With only 29 missing values, we'll continue with a complete case analysis for this variable. This outcome is almost bi-modally distributed and not normal.  
+This outcome is almost bi-modally normally distributed (or just has a large right skew).  
 
 
 ### Model Fitting  
@@ -113,51 +88,131 @@ pqi05_data <- hrr %>%
   select(year, hrr, state, expansion_status,  percent_male, percent_african_american, `percent_hispanic`, percent_eligible_for_medicaid,`pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_40-64)`, `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_65-74)`, `pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_75+)`) %>% 
   gather(age, pqi05, c("pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_40-64)", "pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_65-74)", "pqi05_copd_or_asthma_in_older_adults_admission_rate_(age_75+)")) %>% 
   mutate(age = str_extract(age, "(?<=age_).+(?=\\))"))
+```     
 
-
-mod.nb_pqi05 <- MASS::glm.nb(pqi05 ~ `expansion_status` + `percent_male` + `percent_african_american` + percent_hispanic + `percent_eligible_for_medicaid` + `age` + offset(log(year)), data = pqi05_data)
+##### Start with the base model  
+```{r}
+mod.nb_pqi05 <- MASS::glm.nb(pqi05 ~ `expansion_status` + offset(log(year)), data = pqi05_data)
 summary(mod.nb_pqi05)
-```    
+```  
+
+
+We'll start adding in potential covariates and use likelihood ratio tests to determine if they should be added to the model.  
+
+##### Percent Male  
+
+```{r}
+mod.nb_pqi05_c1 <- MASS::glm.nb(pqi05 ~ `expansion_status` +  percent_male + offset(log(year)), data = pqi05_data)
+summary(mod.nb_pqi05_c1)
+
+anova(mod.nb_pqi05, mod.nb_pqi05_c1)
+```  
+By the LRT, we add percent_male into the model.   
+
+##### Percent African American  
+
+```{r}
+mod.nb_pqi05_c2 <- MASS::glm.nb(pqi05 ~ `expansion_status` +  percent_male + percent_african_american + offset(log(year)), data = pqi05_data)
+summary(mod.nb_pqi05_c2)
+
+anova(mod.nb_pqi05_c1, mod.nb_pqi05_c2)
+```     
+By the LRT, we add in percent African American into the model.  
+
+##### Percent Hispanic  
+
+```{r}
+mod.nb_pqi05_c3 <- MASS::glm.nb(pqi05 ~ `expansion_status` +  percent_male + percent_african_american + percent_hispanic + offset(log(year)), data = pqi05_data)
+summary(mod.nb_pqi05_c3)
+
+anova(mod.nb_pqi05_c2, mod.nb_pqi05_c3)
+```      
+By the LRT, we add in percent hispanic into the model.  
+
+##### Age category  
+
+We add in the age category by which the data was originally split up.  
+
+```{r}
+mod.nb_pqi05_c4 <- MASS::glm.nb(pqi05 ~ `expansion_status` +  percent_male + percent_african_american + percent_hispanic + age + offset(log(year)), data = pqi05_data)
+summary(mod.nb_pqi05_c4)
+
+anova(mod.nb_pqi05_c3, mod.nb_pqi05_c4)
+```      
+By the LRT, we add age category into the model.  
+
+
+##### Percent Eligible for Medicaid  
+```{r}
+mod.nb_pqi05_c5 <- MASS::glm.nb(pqi05 ~ `expansion_status` +  percent_male + percent_african_american + percent_hispanic + age + percent_eligible_for_medicaid + offset(log(year)), data = pqi05_data)
+summary(mod.nb_pqi05_c5)
+
+anova(mod.nb_pqi05_c4, mod.nb_pqi05_c5)
+```       
+
+By the LRT, we add in the percent eligible for Medicaid.  
+
 
 ##### Check for quadratic effects of `percent_eligible_for_medicaid`  
 
 ```{r}
-mod.nb_pqi05_1 <- MASS::glm.nb(pqi05 ~ `expansion_status` + `percent_male` + `percent_african_american` + percent_hispanic + `percent_eligible_for_medicaid` + `age` + percent_eligible_for_medicaid_2+ offset(log(year)), data = pqi05_data %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
+mod.nb_pqi05_1 <- MASS::glm.nb(pqi05 ~ `expansion_status` +  percent_male + percent_african_american + percent_hispanic + age + percent_eligible_for_medicaid  + percent_eligible_for_medicaid_2+ offset(log(year)), data = pqi05_data %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
 summary(mod.nb_pqi05_1)
-```  
 
+anova(mod.nb_pqi05_c4, mod.nb_pqi05_1)
+```    
 
-
-
+By the LRT, we add the quadratic effects of the percent eligible for medicaid.   
 
 #### Effect Modification  
 
 We think there may be effect modification between % eligible for medicaid and expansion status, since in general Medicaid expansion means a higher percentage of the population qualifies for Medicaid.  
 
 ```{r}
-mod.nb_pqi05_2 <-MASS::glm.nb(pqi05 ~ `expansion_status` + `percent_male` + `percent_african_american` + percent_hispanic + `percent_eligible_for_medicaid` + `age` + percent_eligible_for_medicaid_2+ expansion_status*percent_eligible_for_medicaid + offset(log(year)), data = pqi05_data %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
-summary(mod.nb_pqi05_2 )
-```  
+mod.nb_pqi05_2 <-MASS::glm.nb(pqi05 ~ `expansion_status` +  percent_male + percent_african_american + percent_hispanic + age + percent_eligible_for_medicaid  + percent_eligible_for_medicaid_2 + expansion_status*percent_eligible_for_medicaid + offset(log(year)), data = pqi05_data %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
+summary(mod.nb_pqi05_2 )  
+anova(mod.nb_pqi05_1, mod.nb_pqi05_2)
+```   
 
-The coefficients for the interaction are significant, so we will keep it in the model. 
-
+By the LRT, we add the interaction term to the model.  
 
 #### Model Diagnostics  
 
+```{r}
+AIC(mod.nb_pqi05)
+AIC(mod.nb_pqi05_c1)
+AIC(mod.nb_pqi05_c2)
+AIC(mod.nb_pqi05_c3)
+AIC(mod.nb_pqi05_c4)
+AIC(mod.nb_pqi05_c5)
+AIC(mod.nb_pqi05_1)
+AIC(mod.nb_pqi05_2)
+```    
+
+The full model has the lowest AIC.   
 
 ```{r}
-pqi05_data %>% 
-  na.omit() %>% 
-  ggplot(aes(x = pqi05, y = fitted(mod.nb_pqi05_2))) +
-  geom_point(alpha = 0.7) +
-  geom_smooth() +
-  theme_bw()
-```  
+BIC(mod.nb_pqi05)
+BIC(mod.nb_pqi05_c1)
+BIC(mod.nb_pqi05_c2)
+BIC(mod.nb_pqi05_c3)
+BIC(mod.nb_pqi05_c4)
+BIC(mod.nb_pqi05_c5)
+BIC(mod.nb_pqi05_1)
+BIC(mod.nb_pqi05_2)
+```     
+The full model has the lowest AIC and BIC of all the models. 
+
 
 ##### Check Poisson model  
 
+As a last step, we'll check the model as a Poisson model, and check if there is truly overdispersion.
+
 ```{r}
-mod.pois_pqi05 <- glm(pqi05 ~ `expansion_status` + `percent_male` + `percent_african_american` + percent_hispanic + `percent_eligible_for_medicaid` + `age` + percent_eligible_for_medicaid_2+ expansion_status*percent_eligible_for_medicaid, offset = log(year), data = pqi05_data %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = "poisson")
+mod.pois_pqi05 <- glm(pqi05 ~ expansion_status + percent_male + 
+    percent_african_american + percent_hispanic + age + percent_eligible_for_medicaid + 
+    percent_eligible_for_medicaid_2 + expansion_status * percent_eligible_for_medicaid + 
+    offset(log(year)), data = pqi05_data %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = "poisson")
 
 # Evaluate overdispersion
 deviance(mod.pois_pqi05)/mod.pois_pqi05$df.residual #  138.7201
@@ -175,7 +230,7 @@ By these, we can say the negative binomial is the right choice.
 #### Interpretation  
 
 ```{r}
-coef(mod.nb_pqi05_2)
+exp(coef(mod.nb_pqi05_2))
 exp(confint(mod.nb_pqi05_2))
 ```    
 
@@ -194,39 +249,112 @@ pqi08_data <- hrr %>%
 
 mod.nb_pqi08 <- MASS::glm.nb(pqi08 ~ `expansion_status` + `percent_male` + `percent_african_american` + percent_hispanic + `percent_eligible_for_medicaid` + `age` + offset(log(year)), data = pqi08_data)
 summary(mod.nb_pqi08)
-```    
+```     
 
-##### Check for quadratic effects of `percent_eligible_for_medicaid`  
-
+##### Start with the base model  
 ```{r}
-mod.nb_pqi08_1 <- MASS::glm.nb(pqi08 ~ `expansion_status` + `percent_male` + `percent_african_american` + percent_hispanic + `percent_eligible_for_medicaid` + `age` + percent_eligible_for_medicaid_2+ offset(log(year)), data = pqi08_data %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
-summary(mod.nb_pqi08_1)
+mod.nb_pqi08 <- MASS::glm.nb(pqi08 ~ `expansion_status` + offset(log(year)), data = pqi08_data)
+summary(mod.nb_pqi08)
 ```  
 
+We’ll start adding in potential covariates and use likelihood ratio tests to determine if they should be added to the model.
+
+##### Percent Male   
+```{r}
+mod.nb_pqi08_c1 <- MASS::glm.nb(pqi08 ~ `expansion_status` +  percent_male + offset(log(year)), data = pqi08_data)
+summary(mod.nb_pqi08_c1)
+
+anova(mod.nb_pqi08, mod.nb_pqi08_c1)
+```  
+By the LRT, we add percent_male into the model.  
+
+##### Percent African American   
+```{r}
+mod.nb_pqi08_c2 <- MASS::glm.nb(pqi08 ~ `expansion_status` +  percent_male + percent_african_american + offset(log(year)), data = pqi08_data)
+summary(mod.nb_pqi08_c2)
+
+anova(mod.nb_pqi08_c1, mod.nb_pqi08_c2)
+```    
+
+
+By the LRT, we add in percent African American into the model.   
+
+##### Percent Hispanic
+
+```{r}
+mod.nb_pqi08_c3 <- MASS::glm.nb(pqi08 ~ `expansion_status` +  percent_male + percent_african_american + percent_hispanic + offset(log(year)), data = pqi08_data)
+summary(mod.nb_pqi08_c3)  
+anova(mod.nb_pqi08_c2, mod.nb_pqi08_c3)
+```   
+
+By the LRT, we add percent hispanic to the model.  
+
+##### Age category  
+
+```{r}
+mod.nb_pqi08_c4 <- MASS::glm.nb(pqi08 ~ `expansion_status` +  percent_male + percent_african_american + percent_hispanic + age + offset(log(year)), data = pqi08_data)
+summary(mod.nb_pqi08_c4) 
+anova(mod.nb_pqi08_c3, mod.nb_pqi08_c4)
+```  
+
+By the LRT, we add in age category to the model.  
+
+##### Percent Eligible for Medicaid  
+
+```{r}
+mod.nb_pqi08_c5 <- MASS::glm.nb(pqi08 ~ `expansion_status` +  percent_male + percent_african_american + percent_hispanic + age + percent_eligible_for_medicaid + offset(log(year)), data = pqi08_data)
+summary(mod.nb_pqi08_c5)
+anova(mod.nb_pqi08_c4, mod.nb_pqi08_c5)
+```  
+
+By the LRT we add in percent eligible for medicaid into the model.  
+
+##### Check for quadratic effects of `percent_eligible_for_medicaid`   
+
+```{r}
+mod.nb_pqi08_1 <- MASS::glm.nb(pqi08 ~ `expansion_status` +  percent_male + percent_african_american + percent_hispanic + age + percent_eligible_for_medicaid  + percent_eligible_for_medicaid_2+ offset(log(year)), data = pqi08_data %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
+summary(mod.nb_pqi08_1)  
+anova(mod.nb_pqi08_c5, mod.nb_pqi08_1)
+```    
+By the LRT we add the quadratic effects of percent eligible for medicaid to the model.  
 
 #### Effect Modification  
 
 We think there may be effect modification between % eligible for medicaid and expansion status, since in general Medicaid expansion means a higher percentage of the population qualifies for Medicaid.  
 
 ```{r}
-mod.nb_pqi08_2 <- MASS::glm.nb(pqi08 ~ `expansion_status` + `percent_male` + `percent_african_american` + percent_hispanic + `percent_eligible_for_medicaid` + `age` + percent_eligible_for_medicaid_2+ percent_eligible_for_medicaid*expansion_status + offset(log(year)), data = pqi08_data %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
-summary(mod.nb_pqi08_2)
-```  
+mod.nb_pqi08_2 <- MASS::glm.nb(pqi08 ~ `expansion_status` +  percent_male + percent_african_american + percent_hispanic + age + percent_eligible_for_medicaid  + percent_eligible_for_medicaid_2 + expansion_status*percent_eligible_for_medicaid + offset(log(year)), data = pqi08_data %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
+summary(mod.nb_pqi08_2)  
+anova(mod.nb_pqi08_1, mod.nb_pqi08_2)
+```    
 
-The coefficients for the interaction are significant, so we will keep it in the model. 
-
+By the LRT, we add the interaction term to the model.  
 
 #### Model Diagnostics  
 
 
 ```{r}
-pqi08_data %>% 
-  na.omit() %>% 
-  ggplot(aes(x = pqi08, y = fitted(mod.nb_pqi08_2))) +
-  geom_point(alpha = 0.7) +
-  geom_smooth() +
-  theme_bw()
+AIC(mod.nb_pqi08)
+AIC(mod.nb_pqi08_c1)
+AIC(mod.nb_pqi08_c2)
+AIC(mod.nb_pqi08_c3)
+AIC(mod.nb_pqi08_c4)
+AIC(mod.nb_pqi08_c5)
+AIC(mod.nb_pqi08_1)
+AIC(mod.nb_pqi08_2)
+```   
+
+```{r}
+BIC(mod.nb_pqi08)
+BIC(mod.nb_pqi08_c1)
+BIC(mod.nb_pqi08_c2)
+BIC(mod.nb_pqi08_c3)
+BIC(mod.nb_pqi08_c4)
+BIC(mod.nb_pqi08_c5)
+BIC(mod.nb_pqi08_1)
+BIC(mod.nb_pqi08_2)
 ```  
+The full model has the lowest AIC and BIC of all the models.
 
 ##### Check Poisson model  
 
@@ -243,13 +371,13 @@ mean(pqi08_data$pqi08, na.rm = T) #  1396.131
 var(pqi08_data$pqi08, na.rm = T) # 669616.2
 ```  
 
-By these, we can say the negative binomial is the right choice.   
+Due to the evidence of overdispersion, we can say the negative binomial is the right choice.   
 
 
 #### Interpretation  
 
 ```{r}
-coef(mod.nb_pqi08_2)
+exp(coef(mod.nb_pqi08_2))
 exp(confint(mod.nb_pqi08_2))
 ```  
 

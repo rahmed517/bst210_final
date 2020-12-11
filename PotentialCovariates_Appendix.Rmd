@@ -1,0 +1,110 @@
+---
+title: "Potential Confounders"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+medicare <- read_csv("data/medicare_2007_2018.csv")
+medicare$expansion_status <- factor(medicare$expansion_status)
+
+hrr <- read_csv("data/hrr_all_years.csv")
+hrr$expansion_status <- factor(hrr$expansion_status)
+```   
+## GVPUF - County
+
+### Potential Covariates  
+We evaluated what percentage of each of our covariates of interest were missing:  
+
+```{r}
+tbl <- medicare %>% 
+  select(
+    county, average_age, percent_male, `percent_non-hispanic_white`, 
+    percent_african_american, percent_hispanic, 
+    percent_eligible_for_medicaid
+  ) %>% 
+  summarize_all(.funs = function(x) 
+    return(paste0(round(sum(is.na(x))/length(x), 3)*100, "%"))) %>% 
+  t() %>% data.frame() 
+
+names(tbl) <- c("% of Missing values")
+kableExtra::kable(tbl)
+```    
+
+We investigated the pattern of missingness:  
+
+```{r}
+medicare %>% 
+  mutate(
+    p_white_missing = is.na(`percent_non-hispanic_white`),
+    p_aa_missing = is.na(percent_african_american),
+    p_h_missing = is.na(percent_hispanic)
+  ) %>% 
+  group_by(year, p_white_missing, p_aa_missing, p_h_missing) %>% 
+  summarize(cnt = n())
+```   
+
+It appears that the same counties do not report these metrics. Given the high percentage of missingness in these covariates, I've decided to drop them from my potential covariates list.  
+
+#### Check correlaton in the covariates  
+
+Complete cases with race variables
+
+```{r}
+medicare %>% 
+  select(
+    average_age, percent_male, `percent_non-hispanic_white`, 
+    percent_african_american, percent_hispanic, 
+    percent_eligible_for_medicaid
+  ) %>% na.omit() %>% 
+  cor() %>% corrplot::corrplot(method = "number")
+```     
+There is a strong correlation between percent African American and percent non-Hispanic white.  
+
+Complete cases without race variables
+
+```{r}
+medicare %>% 
+  select(
+    average_age, percent_male, percent_eligible_for_medicaid
+  ) %>% na.omit() %>% 
+  cor() %>% 
+  corrplot::corrplot(method = "number")
+```      
+Without the race variables, which have a high amount of missingness, there is a high correlation between percent eligible for Medicaid and average age.  
+
+## GVPUF - HRR
+
+### Potential Covariates  
+We evaluated what percentage of each of our covariates of interest were missing:  
+
+```{r}
+tbl <- hrr %>% 
+  select(
+    hrr, average_age, percent_male, `percent_non-hispanic_white`, percent_african_american, percent_hispanic, percent_eligible_for_medicaid
+  ) %>% 
+  summarize_all(.funs = function(x) 
+    return(paste0(round(sum(is.na(x))/length(x), 3)*100, "%"))) %>% 
+  t() %>% data.frame() 
+
+names(tbl) <- c("% of Missing values")
+kableExtra::kable(tbl)
+```    
+
+There is a very small amount of missingness across this data.  
+
+#### Check correlaton in the covariates  
+
+```{r}
+hrr %>% 
+  select(
+    average_age, percent_male, `percent_non-hispanic_white`, 
+    percent_african_american, percent_hispanic, 
+    percent_eligible_for_medicaid
+  ) %>% na.omit() %>% 
+  cor() %>% corrplot::corrplot(method = "number")
+```     
+There is a high amount of correlation between percent Hispanic and percnet non-Hispanic white. 
+
