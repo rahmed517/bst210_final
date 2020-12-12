@@ -10,6 +10,8 @@ library(ggplot2)
 
 hrr <- read_csv("data/hrr_all_years.csv")
 hrr$expansion_status <- factor(hrr$expansion_status)
+# Reduce to 2018 and evaluate:
+hrr <- hrr %>% filter(year == 2018)
 ```
 
 ### PQIs of Interest  
@@ -73,7 +75,8 @@ hrr %>%
 
 ```    
 
-This outcome is almost bi-modally normally distributed (or just has a large right skew).  
+This outcome is almost bi-modally normally distributed (or just has a large right skew).   
+
 
 
 ### Model Fitting  
@@ -174,7 +177,7 @@ summary(mod.nb_pqi05_2 )
 anova(mod.nb_pqi05_1, mod.nb_pqi05_2)
 ```   
 
-By the LRT, we add the interaction term to the model.  
+By the LRT, we do not add the interaction term to the model.  
 
 #### Model Diagnostics  
 
@@ -186,7 +189,6 @@ AIC(mod.nb_pqi05_c3)
 AIC(mod.nb_pqi05_c4)
 AIC(mod.nb_pqi05_c5)
 AIC(mod.nb_pqi05_1)
-AIC(mod.nb_pqi05_2)
 ```    
 
 The full model has the lowest AIC.   
@@ -199,7 +201,6 @@ BIC(mod.nb_pqi05_c3)
 BIC(mod.nb_pqi05_c4)
 BIC(mod.nb_pqi05_c5)
 BIC(mod.nb_pqi05_1)
-BIC(mod.nb_pqi05_2)
 ```     
 The full model has the lowest AIC and BIC of all the models. 
 
@@ -211,17 +212,17 @@ As a last step, we'll check the model as a Poisson model, and check if there is 
 ```{r}
 mod.pois_pqi05 <- glm(pqi05 ~ expansion_status + percent_male + 
     percent_african_american + percent_hispanic + age + percent_eligible_for_medicaid + 
-    percent_eligible_for_medicaid_2 + expansion_status * percent_eligible_for_medicaid + 
+    percent_eligible_for_medicaid_2 + 
     offset(log(year)), data = pqi05_data %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = "poisson")
 
 # Evaluate overdispersion
-deviance(mod.pois_pqi05)/mod.pois_pqi05$df.residual #  138.7201
+deviance(mod.pois_pqi05)/mod.pois_pqi05$df.residual #  78.17053
 pearson.stat_pqi05 <- sum((na.omit(pqi05_data)$pqi05 - fitted(mod.pois_pqi05))^2/fitted(mod.pois_pqi05))
-pearson.stat_pqi05/mod.pois_pqi05$df.residual # 144.1579
+pearson.stat_pqi05/mod.pois_pqi05$df.residual # 79.35596
 
 # Evidence of overdispersion 
-mean(pqi05_data$pqi05, na.rm = T) # 1249.904
-var(pqi05_data$pqi05, na.rm = T) # 325943.6
+mean(pqi05_data$pqi05, na.rm = T) # 866.4775
+var(pqi05_data$pqi05, na.rm = T) # 157324.5
 ```  
 
 By these, we can say the negative binomial is the right choice.   
@@ -230,8 +231,8 @@ By these, we can say the negative binomial is the right choice.
 #### Interpretation  
 
 ```{r}
-exp(coef(mod.nb_pqi05_2))
-exp(confint(mod.nb_pqi05_2))
+exp(coef(mod.nb_pqi05_1))
+exp(confint(mod.nb_pqi05_1))
 ```    
 
 
@@ -245,10 +246,6 @@ pqi08_data <- hrr %>%
   select(year, hrr, state, expansion_status,  percent_male, percent_african_american, `percent_hispanic`, percent_eligible_for_medicaid,`pqi08_chf_admission_rate_(age_65-74)`, `pqi08_chf_admission_rate_(age_75+)`, `pqi08_chf_admission_rate_(age_<_65)`) %>% 
   gather(age, pqi08, c("pqi08_chf_admission_rate_(age_<_65)", "pqi08_chf_admission_rate_(age_65-74)", "pqi08_chf_admission_rate_(age_75+)")) %>% 
   mutate(age = str_extract(age, "(?<=age_).+(?=\\))"))
-
-
-mod.nb_pqi08 <- MASS::glm.nb(pqi08 ~ `expansion_status` + `percent_male` + `percent_african_american` + percent_hispanic + `percent_eligible_for_medicaid` + `age` + offset(log(year)), data = pqi08_data)
-summary(mod.nb_pqi08)
 ```     
 
 ##### Start with the base model  
@@ -328,7 +325,7 @@ summary(mod.nb_pqi08_2)
 anova(mod.nb_pqi08_1, mod.nb_pqi08_2)
 ```    
 
-By the LRT, we add the interaction term to the model.  
+By the LRT, we don't add the interaction term to the model.  
 
 #### Model Diagnostics  
 
@@ -341,7 +338,6 @@ AIC(mod.nb_pqi08_c3)
 AIC(mod.nb_pqi08_c4)
 AIC(mod.nb_pqi08_c5)
 AIC(mod.nb_pqi08_1)
-AIC(mod.nb_pqi08_2)
 ```   
 
 ```{r}
@@ -352,23 +348,22 @@ BIC(mod.nb_pqi08_c3)
 BIC(mod.nb_pqi08_c4)
 BIC(mod.nb_pqi08_c5)
 BIC(mod.nb_pqi08_1)
-BIC(mod.nb_pqi08_2)
 ```  
 The full model has the lowest AIC and BIC of all the models.
 
 ##### Check Poisson model  
 
 ```{r}
-mod.pois_pqi08 <- glm(pqi08 ~ `expansion_status` + `percent_male` + `percent_african_american` + percent_hispanic + `percent_eligible_for_medicaid` + `age` + percent_eligible_for_medicaid_2+ percent_eligible_for_medicaid*expansion_status, offset = log(year), data = pqi08_data %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = "poisson")
+mod.pois_pqi08 <- glm(pqi08 ~ `expansion_status` + `percent_male` + `percent_african_american` + percent_hispanic + `percent_eligible_for_medicaid` + `age` + percent_eligible_for_medicaid_2, offset = log(year), data = pqi08_data %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = "poisson")
 
 # Evaluate overdispersion
-deviance(mod.pois_pqi08)/mod.pois_pqi08$df.residual #  98.75487
+deviance(mod.pois_pqi08)/mod.pois_pqi08$df.residual #  90.85094
 pearson.stat_pqi08 <- sum((na.omit(pqi08_data)$pqi08 - fitted(mod.pois_pqi08))^2/fitted(mod.pois_pqi08))
-pearson.stat_pqi08/mod.pois_pqi08$df.residual # 99.92519
+pearson.stat_pqi08/mod.pois_pqi08$df.residual # 90.84562
 
 # Evidence of overdispersion 
-mean(pqi08_data$pqi08, na.rm = T) #  1396.131
-var(pqi08_data$pqi08, na.rm = T) # 669616.2
+mean(pqi08_data$pqi08, na.rm = T) #  1447.86
+var(pqi08_data$pqi08, na.rm = T) # 606848.1
 ```  
 
 Due to the evidence of overdispersion, we can say the negative binomial is the right choice.   
@@ -377,9 +372,34 @@ Due to the evidence of overdispersion, we can say the negative binomial is the r
 #### Interpretation  
 
 ```{r}
-exp(coef(mod.nb_pqi08_2))
-exp(confint(mod.nb_pqi08_2))
+exp(coef(mod.nb_pqi08_1))
+exp(confint(mod.nb_pqi08_1))
+```    
+
+
+Create plots for report  
+
+```{r}
+pqi05_data %>% 
+  na.omit() %>% 
+  ggplot(aes(x = expansion_status, y = pqi05, fill = expansion_status)) +
+  geom_violin(alpha = 0.5, draw_quantiles = c(0.5)) +
+  xlab("Expansion Status") +
+  ylab("COPD or asthma admissions in older\n adults per 1,000 Beneficiaries") + 
+  scale_y_continuous(labels = scales::comma) +
+  ggtitle("2018 Average PQI 05")
 ```  
+```{r}
+pqi08_data %>% 
+  na.omit() %>% 
+  ggplot(aes(x = expansion_status, y = pqi08, fill = expansion_status)) +
+  geom_violin(alpha = 0.5, draw_quantiles = c(0.5)) +
+  xlab("Expansion Status") +
+  ylab("Congestive heart failure admissions per 1,000 beneficiaries") + 
+  scale_y_continuous(labels = scales::comma) +
+  ggtitle("2018 Average PQI 08")
+```
+
 
 
 

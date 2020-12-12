@@ -9,6 +9,7 @@ library(tidyverse)
 library(ggplot2)
 medicare <- read_csv("data/medicare_2007_2018.csv")
 medicare$expansion_status <- factor(medicare$expansion_status)
+medicare <- medicare %>% filter(year == 2018)
 ```  
 
 We built a similar model to the emergency department visits model to model the relationship between outpatient visits per 1,000 beneficiaries and Medicaid Expansion status.  We added potential covariates one by one and evaluated the fit using likelihood ratio tests, with the intention of getting the best fit possible with this data. We did not identify any of these covariates as potentially confounding the relationship between the outpatient visit rate and Medicaid expansion status.  
@@ -23,11 +24,24 @@ medicare %>%
   scale_y_continuous(labels = scales::comma) +
   xlab("Outpatient Visits per 1,000 Beneficiaries") +
   ylab("Count") +
-  ggtitle("Distribution of Outpatient Visit Rates (2007-2018)") +
+  ggtitle("Distribution of Outpatient Visit Rates (2018)") +
   theme_bw()
-```    
-The outcome is pretty right skewed.  
+```      
+The outcome is pretty right skewed.   
 
+Create figure for paper:  
+```{r}
+medicare %>% 
+  na.omit() %>% 
+  ggplot(aes(x = expansion_status, y = op_visits_per_1000_beneficiaries, fill = expansion_status)) +
+  geom_violin(alpha = 0.5, draw_quantiles = c(0.5)) +
+  xlab("Expansion Status") +
+  ylab("Outpatient Visits per 1,000 Beneficiaries") + 
+  scale_y_continuous(labels = scales::comma) +
+  ggtitle("2018 Average Outpatient Visits per 1,000 Beneficiaries")
+```
+
+ 
 We next check missingness in the outcome  
 
 ```{r}
@@ -43,7 +57,7 @@ medicare %>%
 
 First we fit the base model:  
 ```{r}
-mod.nb_op<- MASS::glm.nb( op_visits_per_1000_beneficiaries ~ percent_eligible_for_medicaid +  offset(log(year)), data = medicare)
+mod.nb_op<- MASS::glm.nb( op_visits_per_1000_beneficiaries ~ expansion_status +  offset(log(year)), data = medicare)
 
 summary(mod.nb_op)
 
@@ -79,11 +93,11 @@ model_diagnostics <- model_diagnostics %>%
 
 ```    
 
-By the LRT, we add percent male into the model.  
+By the LRT, we don't add percent male into the model.  
 
 ###### Percent Eligible for Medicaid
 ```{r}
-mod.nb_op_c2 <- MASS::glm.nb(op_visits_per_1000_beneficiaries ~ expansion_status + percent_male + percent_eligible_for_medicaid + offset(log(year)), data = medicare)
+mod.nb_op_c2 <- MASS::glm.nb(op_visits_per_1000_beneficiaries ~ expansion_status + percent_male  + percent_eligible_for_medicaid + offset(log(year)), data = medicare)
 summary(mod.nb_op_c2)           
 
 # Use Anova to determine if confounder is necessary
@@ -104,7 +118,7 @@ By the LRT, we add percent eligible for medicaid to the model.
 
 ###### Average Age
 ```{r}
-mod.nb_op_c3 <- MASS::glm.nb(op_visits_per_1000_beneficiaries ~ expansion_status + percent_male + percent_eligible_for_medicaid + average_age + offset(log(year)), data = medicare)
+mod.nb_op_c3 <- MASS::glm.nb(op_visits_per_1000_beneficiaries ~ expansion_status  + percent_male + percent_eligible_for_medicaid + average_age + offset(log(year)), data = medicare)
 summary(mod.nb_op_c3)           
 
 # Use Likelihood ratio test to determine if covariate is necessary
@@ -124,7 +138,7 @@ By the LRT, we add average age to the model.
 
 ##### Check for quadratic effects of `percent_eligible_for_medicaid`   
 ```{r}
-mod.nb_op_1 <- MASS::glm.nb(op_visits_per_1000_beneficiaries ~ expansion_status + percent_male + percent_eligible_for_medicaid + average_age + percent_eligible_for_medicaid_2 + offset(log(year)), data = medicare %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
+mod.nb_op_1 <- MASS::glm.nb(op_visits_per_1000_beneficiaries ~ expansion_status  + percent_male + percent_eligible_for_medicaid + average_age + percent_eligible_for_medicaid_2 + offset(log(year)), data = medicare %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
 
 summary(mod.nb_op_1)
 anova(mod.nb_op_c3, mod.nb_op_1) # Yes 
@@ -144,7 +158,7 @@ model_diagnostics <- model_diagnostics %>%
 We think there may be effect modification between % eligible for medicaid and expansion status, since in general Medicaid expansion means a higher percentage of the population qualifies for Medicaid.  
 
 ```{r}
-mod.nb_op_2 <- MASS::glm.nb(op_visits_per_1000_beneficiaries ~ expansion_status + percent_male + percent_eligible_for_medicaid + average_age + percent_eligible_for_medicaid_2  + percent_eligible_for_medicaid*expansion_status+ offset(log(year)), data = medicare %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
+mod.nb_op_2 <- MASS::glm.nb(op_visits_per_1000_beneficiaries ~ expansion_status  + percent_eligible_for_medicaid + percent_male + average_age + percent_eligible_for_medicaid_2  + percent_eligible_for_medicaid*expansion_status+ offset(log(year)), data = medicare %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2))
 
 summary(mod.nb_op_2)
 
@@ -173,12 +187,12 @@ We have the smallest AIC and BIC with the full model.
 ##### Check Poisson model  
 
 ```{r}
-mod.pois_ed <- glm(op_visits_per_1000_beneficiaries ~ expansion_status + percent_male + percent_eligible_for_medicaid + average_age + percent_eligible_for_medicaid_2  + percent_eligible_for_medicaid*expansion_status+ offset(log(year)), data = medicare %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = "poisson")
+mod.pois_ed <- glm(op_visits_per_1000_beneficiaries ~ expansion_status  + percent_eligible_for_medicaid + percent_male + average_age + percent_eligible_for_medicaid_2  + percent_eligible_for_medicaid*expansion_status+ offset(log(year)), data = medicare %>% mutate(percent_eligible_for_medicaid_2 = percent_eligible_for_medicaid^2), family = "poisson")
 
 # Evaluate overdispersion
-deviance(mod.pois_ed)/mod.pois_ed$df.residual # 604.9794
+deviance(mod.pois_ed)/mod.pois_ed$df.residual # 710.5393
 pearson.stat_ed <- sum((na.omit(medicare %>% select(percent_male, percent_eligible_for_medicaid, average_age,op_visits_per_1000_beneficiaries, expansion_status))$op_visits_per_1000_beneficiaries - fitted(mod.pois_ed))^2/fitted(mod.pois_ed))
-pearson.stat_ed/mod.pois_ed$df.residual #  633.6993
+pearson.stat_ed/mod.pois_ed$df.residual #  730.8859
 
 # Evidence of overdispersion 
 mean(medicare$op_visits_per_1000_beneficiaries, na.rm = T) 
@@ -190,7 +204,23 @@ Due to the evidence of dispersion, the negative binomial model seems to be the a
 
 #### Interpretation  
 
+Get estimated IRR and 95\% confidence interval for expansion status with the effects of percent eligible for Medicaid (2 v 1)
 ```{r}
-exp(coef(mod.nb_op_2))
-exp(confint(mod.nb_op_2))
-```  
+exp(coef(mod.nb_op_2)[2] + coef(mod.nb_op_2)[9])
+exp((coef(mod.nb_op_2)[2] + coef(mod.nb_op_2)[9]) +c(-1,1)*1.96*(vcov(mod.nb_op_2)[2,2] + vcov(mod.nb_op_2)[9, 9] - 2*vcov(mod.nb_op_2)[9,2]))
+```   
+
+Get estimated IRR and 95\% confidence interval for expansion status with the effects of percent eligible for Medicaid (3 v 1)
+```{r}
+exp(coef(mod.nb_op_2)[3] + coef(mod.nb_op_2)[10])
+exp((coef(mod.nb_op_2)[3] + coef(mod.nb_op_2)[10]) +c(-1,1)*1.96*(vcov(mod.nb_op_2)[3,3] + vcov(mod.nb_op_2)[10, 10] - 2*vcov(mod.nb_op_2)[10,3]))
+```     
+
+Get estimated IRR and 95\% confidence interval for expansion status with the effects of percent eligible for Medicaid (4 v 1)
+```{r}
+exp(coef(mod.nb_op_2)[4] + coef(mod.nb_op_2)[11])
+exp((coef(mod.nb_op_2)[4] + coef(mod.nb_op_2)[11]) +c(-1,1)*1.96*(vcov(mod.nb_op_2)[4,4] + vcov(mod.nb_op_2)[11, 11] - 2*vcov(mod.nb_op_2)[11,4]))
+```   
+
+
+
