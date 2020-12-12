@@ -1,13 +1,14 @@
 ---
-title: "Medicare Expansion Analysis: Part 2"
-output: html_document
+title: "Effect of Medicaid Expansion on the Medicare Population Analysis"
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-#### Data Prep
 
 ```{r, echo=FALSE, include=FALSE}
 library(tidyverse)
@@ -90,11 +91,11 @@ state_demo <- state_demo %>%
 ```
 
 
-```{r, echo=FALSE, include =FALSE}
+```{r, include =FALSE}
 state_demo %>% 
   filter(!county %in% c("NATIONAL TOTAL", "STATE TOTAL") & !is.na(expansion_status)) %>% 
   group_by(expansion_status) %>% 
-  summarize(avg_mcd_elig = mean(percent_eligible_for_medicaid, na.rm = T),
+  summarize(avg_med_elig = mean(percent_eligible_for_medicaid, na.rm = T),
             cnt_counties = n())
 
 state_demo$exp <- ifelse(state_demo$expansion_status == "4", 0, 1)
@@ -108,39 +109,47 @@ county_dat <- state_demo %>% filter(!county %in% c("NATIONAL TOTAL", "STATE TOTA
 county_dat <- county_dat %>% filter(!is.na(percent_eligible_for_medicaid) & 
                                     !is.na(emergency_department_visits_per_1000_beneficiaries) &
                                     !is.na(average_age) &
+                                    !is.na(percent_male) &
                                     !is.na(hospital_readmission_rate) & 
-                                    !is.na(expansion_status))
+                                    !is.na(expansion_status) &
+                                    !is.na(average_hcc_score))
 
+county_dat %>% group_by(expansion_status) %>% 
+               summarize(avg_med_elig = mean(percent_eligible_for_medicaid, 
+                                             na.rm = T),
+                         cnt_counties = n())
 ```
 
 
-## Linear Regression - HCC ~ expansion status
+## Section I: Model 1 - HCC ~ expansion status (Linear Regression) 
 
 The hierarchical condition category (HCC) score is a model developed by 
 CMS to assign risk scores for patients based on health conditions. The risk score
 accounts for factors such as hospital admissions for acute and chronic issues, as well
 as various classes of diseases and conditions ranging in severity. The
-national average score is the reference point, and is equal to 1. A 68 year old individual
-without any complications for their type-2 diabetes and a healthy BMI would be considered 
-to have a total risk of 0, whereas a 68 year old patient with diabetic polyneuropathy, 
-hypertension, obesity, and a below knee amputation would have a risk score of 1.1808
-according to the CMS HCC model. 
+national average score is the reference point, and is equal to 1.  Patients in poorer health than the average beneficiary would have a score greater than 1, whereas a patient with better health than the average beneficiary would have a score closer to 0 according to the CMS HCC model. 
 
 Although it is commonly used by insurance companies to estimate future patient costs, this
 metric can serve as a proxy to quantify the average individual health of a community. The average HCC score across U.S. counties is roughly normally distributed, with
-a median value of 0.96. There distribution is slightly right skewed, and a log transform
+a median value of 0.96. The distribution is slightly right skewed, and a log transform
 might be considered if the model violates the LINE assumptions. 
 
 ### Exploratory Analysis
-```{r}
+```{r, fig.cap = "Figure 1"}
 summary(county_dat$average_hcc_score)
 length(county_dat$average_hcc_score)
-ggplot() + geom_histogram(aes(county_dat$average_hcc_score), col=1) 
+ggplot() + 
+geom_histogram(aes(county_dat$average_hcc_score), col=1)  +
+ggtitle('Normality of Outcome') +
+xlab('average hcc score')
            
 ```
 
-```{r}
-ggplot() + geom_histogram(aes(log10(county_dat$average_hcc_score)), fill=2) 
+```{r, fig.cap = "Figure 2"}
+ggplot() + 
+geom_histogram(aes(log10(county_dat$average_hcc_score)), fill=2, col =1) +
+ggtitle('Normality of Outcome (log)') +
+xlab('log(average hcc score)')
 ```
 
 The primary covariate of interest is expansion status, and average age & percent 
@@ -149,21 +158,31 @@ seems to be a slight difference in average HCC scores in the states that have no
 & states that have expanded Medicaid, with larger variance in the counties that have 
 not expanded. 
 ```{r}
-county_dat  %>% ggplot() + geom_violin(aes(expansion_status, log10(average_hcc_score), 
-                                          fill = expansion_status), alpha = 0.5) 
+county_dat  %>% ggplot() + 
+                geom_violin(aes(expansion_status, average_hcc_score, 
+                            fill = expansion_status), alpha = 0.5,
+                            draw_quantiles = c(0.5)) +
+                #scale_y_reverse() +
+                ylab('average HCC score') + 
+                xlab('expansion status') + 
+                annotate("text", label = "better health", x = 1, y = 0.6) + 
+                annotate("text", label = "worse health", x = 1, y = 1.5) +
+                ggtitle('2018 Average HCC Scores per US County')
 ```
 
 ### Model Considerations
 
 #### Assess Collinearity of Potential Covariates
 
-```{r}
+```{r, fig.caption = "Figure 3"}
 
-vars <- c("average_hcc_score",  
+vars <- c("average_hcc_score",
+          "expansion_status",
           "average_age",
           "percent_male",
           "percent_eligible_for_medicaid")
-covars <- county_dat %>% select(vars) %>% drop_na()
+covars <- county_dat %>% select(vars) %>% 
+          mutate(expansion_status = as.integer(expansion_status)) %>%drop_na()
 corrplot(cor(covars), tl.cex = 0.7)
 
 ```
@@ -203,7 +222,7 @@ be violated based on the residuals vs fitted values plot. Also, the negative
 coefficients seem to be counterintuitive (HCC score would be expected to increase
 with increased age, not decrease as suggested by the negative coefficient).
 
-```{r}
+```{r, fig.cap = "Figure 3: Diagnostic Plots for model without EM"}
 mlr2 <- lm(average_hcc_score ~ expansion_status + 
                               average_age + 
                               percent_male + 
@@ -242,8 +261,10 @@ whether expansion status modifies the % eligible for medicaid in each county.
 
 ```{r}
 mlr_em <- lm(average_hcc_score ~ expansion_status + 
-                              average_age + I(average_age**2) +
+                              average_age  +
+                              percent_male + 
                               percent_eligible_for_medicaid + 
+                              I(percent_eligible_for_medicaid**2) + 
                               expansion_status*percent_eligible_for_medicaid,
           data = county_dat)
 summary(mlr_em)
@@ -256,7 +277,7 @@ with expected directions for increasing males & older members of the county popu
 
 The linearity of the model is also improved with the addition of the interaction term.
 
-```{r}
+```{r, fig.caption = "Figure 4: Diagnostic Plots for Final Model"}
 mlr_em_age_gender <- lm(average_hcc_score ~ expansion_status + 
                               average_age +  #I(average_age**2) +
                               percent_male + I(percent_male**2) + 
@@ -366,7 +387,7 @@ $$
 $$ 
 
 
-## Linear Regression: - HCC 2018 vs 2010
+## Section I: Model 2 -  HCC 2018 vs 2010  ~ expansion status (Linear Regression)
 
 Is there a difference in average HCC scores in 2018 vs 2010 for counties
 that expanded Medicaid early versus late?
@@ -424,6 +445,7 @@ county_dat_combo <- county_dat_combo %>% mutate(
             delta_medicaid = (percent_eligible_for_medicaid_2018 - percent_eligible_for_medicaid_2010)/percent_eligible_for_medicaid_2010)
 
 
+
 county_dat_combo <- county_dat_combo %>% filter(!is.na(expansion_status) &
                                                 !is.na(delta_age) & 
                                                 !is.na(delta_medicaid) &
@@ -436,26 +458,37 @@ county_dat_combo <- county_dat_combo %>% filter(!is.na(expansion_status) &
 Both the hcc ratio of 2018 vs 2010 values and the difference are normally distributed with long tails on both ends. Taking the log transform of the ratio
 does not substantially remedy the long tail issue.
 
-```{r}
+```{r, fig.cap='Figure 1a & 1b'}
 
 
 summary(county_dat_combo$hcc_ratio)
-ggplot() + geom_histogram(aes(county_dat_combo$hcc_ratio), col=1)
+ggplot() + geom_histogram(aes(county_dat_combo$hcc_ratio), col=1) +
+  xlab('HCC ratio (2018 HCC/2010 HCC)') +
+  ggtitle('Normality of Outcome')
 
 summary(county_dat_combo$hcc_ratio)
-ggplot() + geom_histogram(aes(log10(county_dat_combo$hcc_ratio)), col=1)
+ggplot() + geom_histogram(aes(log10(county_dat_combo$hcc_ratio)), col=1) +
+  xlab('HCC ratio (log)') +
+  ggtitle('Normality of Outcome (log)')
 
-summary(county_dat_combo$hcc_diff)
-ggplot() + geom_histogram(aes(county_dat_combo$hcc_diff), col=1)
 ```
 
+```{r, fig.cap = 'Figure 2'}
+
+
+
+summary(county_dat_combo$hcc_diff)
+ggplot() + geom_histogram(aes(county_dat_combo$hcc_diff), col=1) +
+  xlab('HCC difference (2018 HCC-2010 HCC)') +
+  ggtitle('Normality of Outcome')
+```
 
 ```{r}
 comp_red <- lm(hcc_diff ~ as.factor(expansion_status), 
           data = county_dat_combo)
 summary(comp_red)
 ```
-```{r}
+```{r, fig.cap = 'Figure 3'}
 comp1 <- lm(hcc_diff ~ as.factor(expansion_status) +
                        delta_medicaid + 
                        delta_age +
@@ -464,10 +497,12 @@ comp1 <- lm(hcc_diff ~ as.factor(expansion_status) +
 summary(comp1)
 plot(comp1)
 ```
+
+
 The additional quadratic delta_medicaid term improves the linearity of the final
 model, and is statistically significant.
 
-```{r}
+```{r, fig.cap = 'Figure 4'}
 comp2 <- lm(hcc_diff ~ as.factor(expansion_status) +
                        delta_medicaid + 
                        delta_age +
@@ -483,6 +518,7 @@ for medicaid is needed to explain the variation in the data.
 
 ```{r}
 anova(comp_red, comp2)
+AIC(comp2)
 ```
 #### Robust Sandwich Errors for Coefficient Estimates
 
@@ -501,13 +537,43 @@ coeftest(comp2, vcov = vcovHC(comp2, type="HC1"))
 ```
 ```{r}
 # Confidence Intervals
-(0.0196943  + c(-1,1)*1.96*0.0052007) #95% ci for expanded vs not
-
+(-0.0098163   + c(-1,1)*1.96*0.0039447 ) #95% ci for 2 vs 1
+( -0.0103938  + c(-1,1)*1.96* 0.0043592 ) #95% ci for 3 vs 1
+(0.0106918    + c(-1,1)*1.96*0.0039253) #95% ci for 4 vs 1
 
 
 
 ```
-## Logistic Regression
+
+#### Final Model Summary
+
+$$
+\begin{split}
+& E(\text{average HCC score 2018 - average HCC score 2010}) = 0.027 \\
+& -0.0098*\text{I(State Expanded Medicaid in 2014)} + \\
+& -0.01*\text{I(State Expanded Medicaid after 2014)} + \\
+& 0.011*\text{I(State has not Expanded Medicaid)} + \\
+& 1.036*\text{(delta age)} + \\
+& 0.0866*\text{(delta male)} +  \\
+& 0.136*\text{(delta percent eligible for medicaid)}  \\
+& -0.0543*\text{(delta percent eligible for medicaid)}^2  \\
+\end{split}
+$$ 
+```{r}
+county_dat_combo  %>% ggplot() + 
+                geom_violin(aes(expansion_status, average_hcc_score_2010, 
+                            fill = expansion_status), alpha = 0.5,
+                            draw_quantiles = c(0.5)) +
+                # scale_y_reverse() +
+                ylab('average HCC score') + 
+                xlab('expansion status') + 
+                annotate("text", label = "better health", x = 1, y = 0.6) + 
+                annotate("text", label = "worse health", x = 1, y = 1.5) +
+                ggtitle('2010 Average HCC Scores per US County')
+```
+
+
+## Section III: Logistic Regression: Odds of High Emergency Dept Use/Hospital Readmission ~ Expansion Status
 
 Create binary outcome categorizing hospital readmission rates & emergency department visits as high if the county rate exceeds the national average rate (hospital readmission - 18.06%, ED visits - 670 per 1000 beneficiaries)
 
@@ -535,7 +601,7 @@ county_dat['hospital_ED_class'] = case_when(
 ```
 
 
-#### Emergency Department Visits
+### Emergency Department Visits
 
 Expansion status of state is only predictive in the logistic model 
 looking at high ED rates in counties; it is not a statistically significant 
@@ -573,16 +639,22 @@ anova(mod.binary.ed.cont, mod.binary.ed, test="Chisq")
 
 
 ```{r}
-exp(0.44094 + c(-1,1)*0.18333*1.96) # expansion status 2 vs 1
-exp(0.37138 + c(-1,1)*0.20519*1.96) # expansion status 3 vs 1
-exp(0.52777 + c(-1,1)*0.17554*1.96) # expansion status 4 vs 1
+exp(0.48100 + c(-1,1)*0.18347*1.96) # expansion status 2 vs 1
+exp(0.41179 + c(-1,1)*0.20568*1.96) # expansion status 3 vs 1
+exp(0.62052 + c(-1,1)*0.17606*1.96) # expansion status 4 vs 1
 
 
 # continuous
-exp(0.10027 + c(-1,1)*0.04257*1.96)
+exp(0.12982 + c(-1,1)*0.04346*1.96)
+
+# OR - category 4 vs 1
+odds4 = exp(29.40714 + 4*0.12982)
+odds1 = exp(29.40714 + 0.12982)
+OR4v1 = odds4/odds1 # OR
+
 
 ```
-# GOF - Hosmer Lemeshow Goodness of Fit
+#### GOF - Hosmer Lemeshow Goodness of Fit
 ```{r}
 library(ResourceSelection)
 
@@ -590,23 +662,55 @@ hoslem.test(county_dat$high_ED, predict(mod.binary.ed), g = 10)
 hoslem.test(county_dat$high_ED, predict(mod.binary.ed.cont), g= 10)
 ```
 
-```{r}
+```{r, fig.caption = 'Figure 1'}
 library(pROC)
 
 roc_cont <- roc(county_dat$high_ED, predict(mod.binary.ed.cont))
 roc_cat <- roc(county_dat$high_ED, predict(mod.binary.ed))
-plot(roc_cont)
-plot(roc_cat, add =TRUE, col = 3)
+plot(roc_cont, col = 1,lty = 4)
+plot(roc_cat, add =TRUE, col = 4, lty=2, alpha =.5)
 
-legend(0,0.5, legend=c("continuous", "categorical"), col=c(1,3), lty=1)
+legend(0.5,0.5, 
+       legend=c("continuous", "categorical"), 
+       col=c(1,4), lty=c(4,2))
 
 auc(roc_cont)
 auc(roc_cat)
 
 ```
 
+#### Final Model Summary
 
-#### Hospital Readmissions
+$$
+\begin{split}
+& logit(\text{p(high ED usage)}) = 29.4 \\
+& 0.13*\text{(expansion status)}  \\
+& -24.56*\text{(percent male)}   \\
+& -0.322*\text{(average age)} + \\
+& 34.67*\text{(percent eligible for medicaid)}  \\
+& -44.32*\text{(percent eligible for medicaid)}^2  \\
+\end{split}
+$$ 
+
+```{r}
+temp <- county_dat %>% group_by(expansion_status, high_ED) %>% count(high_ED)
+temp %>% ggplot() + 
+         geom_bar(aes(x=expansion_status, 
+                      y=n, fill = as.factor(high_ED)),    
+                  position = "fill", stat='identity' )  +
+         ylab('% high ED usage') + xlab('Expansion Status Category') +
+         ggtitle('Emergency Department Usage Levels') +
+         scale_fill_manual(name='Usage Level',
+                           values = c('0' = "skyblue",
+                                      '1' = "lightcoral"),
+                           labels = c('low', 'high'))
+                           
+  
+
+```
+
+
+### Hospital Readmissions
 ```{r}
 mod.binary.hosp = glm(high_hospital_readmission ~ 
                  as.factor(expansion_status) + 
@@ -618,7 +722,7 @@ summary(mod.binary.hosp)
 ```
 
 
-## Multinomial Regression
+## Multinomial Regression: Risk of High Emergency Dept Use and/or Hospital Readmission ~ Expansion Status
 
 ```{r}
 library(nnet)
@@ -635,7 +739,7 @@ summary(mod.multi)
 ```
 
 The model is not doing a good job classifying health outcome class
-based on expansion status.
+based on expansion status, largely because the raw data does not have clear distinctions across the outcome categories.
 
 ```{r}
 county_dat['predict'] <- predict(mod.multi)
@@ -647,7 +751,7 @@ county_dat %>% ggplot() + geom_histogram(aes(predict, fill = expansion_status), 
 county_dat %>% ggplot() + geom_histogram(aes(hospital_ED_class, fill = expansion_status), stat="count")
 ```
 
-## Ordinal Regression
+## Ordinal Regression: Odds of High Emergency Dept Use and/or Hospital Readmission ~ Expansion Status 
 ```{r}
 library(VGAM)
 ord.all <- vglm(hospital_ED_class ~ 
@@ -694,15 +798,15 @@ summary(mod.32v1)
 
 ```{r}
 
-ord.all_potest <- vglm(hospital_ED_class ~ 
-                 as.factor(expansion_status) + 
-                 percent_male +  
-                 average_age + 
-                 percent_eligible_for_medicaid +
-                 I(percent_eligible_for_medicaid**2), 
-                cumulative(parallel=FALSE, reverse=T), 
-                data=county_dat)
-
-summary(ord.all_potest)
+# ord.all_potest <- vglm(hospital_ED_class ~ 
+#                  as.factor(expansion_status) + 
+#                  percent_male +  
+#                  average_age + 
+#                  percent_eligible_for_medicaid +
+#                  I(percent_eligible_for_medicaid**2), 
+#                 cumulative(parallel=FALSE, reverse=T), 
+#                 data=county_dat)
+# 
+# summary(ord.all_potest)
 ```
 
